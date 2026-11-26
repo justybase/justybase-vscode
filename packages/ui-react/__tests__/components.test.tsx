@@ -1405,6 +1405,32 @@ describe('shared React presentation', () => {
     expect(bands.every(band => band.querySelector('.ui-data-grid-row-number')?.getAttribute('aria-label')?.startsWith('Group starting at row'))).toBe(true);
   });
 
+  it('uses host group counts and shows groups missing from the loaded window', () => {
+    const { container } = render(<DataGrid
+      resultSetId="disk-backed-group-counts"
+      columns={[{ name: 'BALANCE', type: 'INTEGER' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[[875, 1], [875, 2]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['BALANCE'] }}
+      groupCounts={new Map([[JSON.stringify(['875']), 197_274]])}
+      extraGroups={[{ path: ['900'], count: 26_401 }]}
+    />);
+    const counts = Array.from(container.querySelectorAll('.ui-data-grid-group-count'))
+      .map(node => (node.textContent ?? '').replace(/[^\d]/g, ''));
+    expect(counts).toEqual(['197274', '26401']);
+    expect(screen.getByRole('button', { name: 'Expand group BALANCE: 900' })).toHaveAttribute('title', 'Rows for this group are not in the loaded window');
+  });
+
+  it('marks local counts as lower bounds when the host group list is partial', () => {
+    render(<DataGrid
+      resultSetId="partial-disk-backed-groups"
+      columns={[{ name: 'BALANCE', type: 'INTEGER' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[[875, 1], [875, 2]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['BALANCE'] }}
+      groupCountsPartial
+    />);
+    expect(screen.getByText('~2 rows')).toBeInTheDocument();
+  });
+
   it('starts grouped rows collapsed and reopens them on demand', () => {
     render(<DataGrid
       resultSetId="collapsible-groups"

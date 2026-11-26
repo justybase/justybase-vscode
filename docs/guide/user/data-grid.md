@@ -45,6 +45,14 @@ so an open band and its first row share the same number. Deep levels add one
 indent step each, and changing the grouping collapses the tree again. Removing
 the last grouping returns the flat result grid.
 
+For a result that spilled to SQLite, band counts come from the host's exact
+`GROUP BY` over the whole spilled dataset, not from the rows currently loaded
+in the webview. Groups that exist in the spill but not in the loaded window
+are shown as collapsed bands; their rows are not loaded locally, so expanding
+them does not reveal data until that group is loaded. If the host cannot
+enumerate every group, counts are prefixed with `~` to mark them as lower
+bounds.
+
 Open **Analyze → Pivot…** (or the Pivot toolbar button) to choose a row column,
 a pivot column, a numeric value column, and the aggregation. The dialog states
 which input becomes the first column, which becomes the header row, and where

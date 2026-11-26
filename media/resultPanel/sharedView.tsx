@@ -69,6 +69,7 @@ import type {
     DataGridColumnFilterRequest,
     DataGridFormattingOptions,
     DataGridColumnFilterState,
+    DataGridExtraGroup,
     DataGridFilterValueOption,
     DataGridHandle,
     DataGridSelection,
@@ -79,7 +80,7 @@ import type {
     ResultLayoutKind,
 } from '@justybase/ui-react';
 import { asHostMessage, callPanelMethod, getHostState, postHostMessage, setHostState } from './protocol.js';
-import type { DiskColumnFilterSpec, DiskQuerySpec } from './types.js';
+import type { DiskColumnFilterSpec, DiskGroupPathItem, DiskGroupQueryResult, DiskQuerySpec } from './types.js';
 import type { ResultPanelExportFormat, ResultPanelHostToWebviewMessage, ResultPanelTraceEventPayload } from './hostContracts.js';
 import { isSharedCopyFormat, writeSharedClipboard } from './sharedClipboard.js';
 import type { SharedClipboardFormat, SharedCopyFormat } from './sharedClipboard.js';
@@ -626,6 +627,10 @@ export function displaySharedRows(
 }
 
 const SHARED_FILTER_VALUE_LIMIT = 10_000;
+/** Groups enumerated from the SQLite spill for authoritative band counts. */
+const SHARED_DISK_GROUP_PAGE_LIMIT = 10_000;
+/** Nested grouping levels are fetched only for this many top-level parents. */
+const SHARED_DISK_GROUP_NESTED_PARENT_LIMIT = 100;
 
 function sharedFilterValueKey(value: unknown): string {
     if (value === undefined) return 'undefined';
@@ -996,6 +1001,12 @@ export class SharedResultPanelController {
         readonly reject: (error: Error) => void;
         readonly timer: ReturnType<typeof setTimeout>;
     }>();
+    private readonly diskGroupData = new Map<string, {
+        readonly signature: string;
+        readonly counts: ReadonlyMap<string, number>;
+        readonly extraGroups: readonly DataGridExtraGroup[];
+        readonly partial: boolean;
+    }>();
     private testQueryRequestId = 0;
     private testExploreWorkflowActive = false;
     /** Source whose Logs tab the user selected explicitly; new data must not steal it. */
@@ -1037,6 +1048,113 @@ export class SharedResultPanelController {
 
     public isDiskBackedResult(result: UiResultSurfaceState | undefined): boolean {
         return result ? this.diskBacked.has(resultKey(result.sourceId, result.resultSetId)) : false;
+    }
+
+    public getDiskGroupData(result: UiResultSurfaceState | undefined): {
+        readonly counts: ReadonlyMap<string, number>;
+        readonly extraGroups: readonly DataGridExtraGroup[];
+        readonly partial: boolean;
+    } | undefined {
+        if (!result) return undefined;
+        return this.diskGroupData.get(resultKey(result.sourceId, result.resultSetId));
+    }
+
+    private formatDiskGroupPath(result: UiResultSurfaceState, path: readonly DiskGroupPathItem[]): string[] {
+        return path.map(item => {
+            const column = item.columnIndex >= 0 ? result.columns[item.columnIndex] : undefined;
+            return formatDataGridCellValue(item.value, column?.type, column);
+        });
+    }
+
+    /**
+     * Group bands for a spilled result must count every row in SQLite, not only
+     * the page held by the webview. The host already owns the exact GROUP BY
+     * tree; this asks for it and hands authoritative counts to the grid.
+     */
+    private async refreshDiskGroupCounts(result: UiResultSurfaceState): Promise<void> {
+        const key = resultKey(result.sourceId, result.resultSetId);
+        const grouping = result.view.grouping;
+        if (!this.isDiskBackedResult(result) || grouping.length === 0) {
+            if (this.diskGroupData.delete(key)) this.notify();
+            return;
+        }
+        const levels = grouping.flatMap(name => {
+            const columnIndex = result.columns.findIndex(column => column.name === name);
+            return columnIndex < 0 ? [] : [{ columnIndex }];
+        });
+        if (levels.length !== grouping.length) {
+            if (this.diskGroupData.delete(key)) this.notify();
+            return;
+        }
+        const spec = sharedDiskQuerySpec(result);
+        const signature = JSON.stringify({
+            executionId: result.executionId,
+            lastSequence: result.lastSequence,
+            grouping,
+            spec: spec ?? null,
+            totalRowCount: result.totalRowCount,
+        });
+        if (this.diskGroupData.get(key)?.signature === signature) return;
+
+        const requestGroups = async (path: readonly DiskGroupPathItem[]): Promise<DiskGroupQueryResult | undefined> => {
+            const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+            if (!ref) return undefined;
+            const requestId = ++this.testQueryRequestId;
+            const message = await new Promise<Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>>((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    this.pendingDiskQueries.delete(requestId);
+                    reject(new Error('Disk group query timed out.'));
+                }, 15_000);
+                this.pendingDiskQueries.set(requestId, { action: 'group', resolve, reject, timer });
+                postHostMessage({
+                    command: 'diskQuery',
+                    sourceUri: result.sourceId,
+                    resultSetIndex: ref.resultSetIndex,
+                    requestId,
+                    action: 'group',
+                    ...(spec === undefined ? {} : { querySpec: spec }),
+                    grouping: levels,
+                    groupPath: path.map(item => ({ ...item })),
+                    offset: 0,
+                    limit: SHARED_DISK_GROUP_PAGE_LIMIT,
+                });
+            });
+            return message.groupResult;
+        };
+
+        try {
+            const root = await requestGroups([]);
+            if (!root) {
+                this.diskGroupData.delete(key);
+                this.notify();
+                return;
+            }
+            const counts = new Map<string, number>();
+            const extraGroups: DataGridExtraGroup[] = [];
+            let partial = (root.groups?.length ?? 0) < root.totalCount;
+            for (const group of root.groups ?? []) {
+                const path = this.formatDiskGroupPath(result, group.path);
+                counts.set(JSON.stringify(path), group.count);
+                extraGroups.push({ path, count: group.count });
+            }
+            if (levels.length > 1) {
+                for (const parent of (root.groups ?? []).slice(0, SHARED_DISK_GROUP_NESTED_PARENT_LIMIT)) {
+                    const children = await requestGroups(parent.path);
+                    if (!children) continue;
+                    if ((children.groups?.length ?? 0) < children.totalCount) partial = true;
+                    for (const group of children.groups ?? []) {
+                        const path = this.formatDiskGroupPath(result, group.path);
+                        counts.set(JSON.stringify(path), group.count);
+                        extraGroups.push({ path, count: group.count });
+                    }
+                }
+            }
+            this.diskGroupData.set(key, { signature, counts, extraGroups, partial });
+            this.notify();
+        } catch {
+            // Fall back to local counts instead of showing stale exact numbers.
+            if (this.diskGroupData.delete(key)) this.notify();
+        }
     }
 
     public getResultSql(result: UiResultSurfaceState | undefined): { readonly sql?: string; readonly refreshSql?: string } | undefined {
@@ -1457,6 +1575,12 @@ export class SharedResultPanelController {
         if (!result) return;
         this.schedulePersistView(result);
         if (affectsDiskQuery(patch) && this.isDiskBackedResult(result)) this.resetDiskWindow(result);
+        if (
+            this.isDiskBackedResult(result)
+            && (affectsDiskQuery(patch) || patch.grouping !== undefined)
+        ) {
+            void this.refreshDiskGroupCounts(result);
+        }
     }
 
     private schedulePersistView(result: UiResultSurfaceState): void {
@@ -2731,6 +2855,8 @@ export class SharedResultPanelController {
             this.dispatch({ type: 'results/select-source', sourceId: ref.sourceId });
             this.dispatch({ type: 'results/select', sourceId: ref.sourceId, resultSetId: ref.resultSetId });
         }
+        const active = this.resultForRef(ref);
+        if (active && active.view.grouping.length > 0) void this.refreshDiskGroupCounts(active);
     }
 
     private applyRowCountUpdate(message: Extract<ResultPanelHostToWebviewMessage, { command: 'rowCountUpdate' }>): void {
@@ -2873,6 +2999,10 @@ export class SharedResultPanelController {
             resultSetIndex: message.resultSetIndex,
             totalRows: typeof message.totalRows === 'number' ? message.totalRows : (this.rows.get(key) ?? []).length,
         });
+        const completed = this.resultForRef(ref);
+        if (completed && this.isDiskBackedResult(completed) && completed.view.grouping.length > 0) {
+            void this.refreshDiskGroupCounts(completed);
+        }
     }
 
     private applyCancellation(sourceId: string): void {
@@ -4454,6 +4584,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     // The banner is hidden for Logs (that surface owns its own header chip), so
     // it only needs the clock for the data-result lifecycle.
     const view: UiResultSurfaceState['view'] = activeResult?.view ?? { globalFilter: '', columnFilters: {}, sorting: [], grouping: [], aggregation: undefined, columnAggregations: undefined, pivotColumn: undefined, scrollTop: 0, scrollLeft: 0 };
+    const diskGroupData = controller.getDiskGroupData(activeResult);
     const hasAggregations = Object.keys(view.columnAggregations ?? {}).length > 0;
     const rowViewDisplayRows = useMemo(() => {
         if (!selection) return [] as number[];
@@ -4869,6 +5000,9 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         rows={rows}
                         getColumnFormatting={getColumnFormatting}
                         totalRowCount={activeResult.totalRowCount}
+                        groupCounts={diskGroupData?.counts}
+                        extraGroups={diskGroupData?.extraGroups}
+                        groupCountsPartial={diskGroupData?.partial === true}
                         busy={sourceExecuting || activeResult.status === 'loading' || activeResult.status === 'streaming' || analysisLoading}
                         view={activeResult.view}
                         onViewChange={updateView}

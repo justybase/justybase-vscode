@@ -274,6 +274,16 @@ export interface DataGridProps {
   readonly onViewChange?: (patch: Partial<UiResultViewState>) => void;
   /** Server-backed grids keep filtering/sorting in the adapter but share the same renderer. */
   readonly clientProcessing?: boolean;
+  /**
+   * Exact group counts supplied by the host (keyed by the JSON string of the
+   * formatted value path). Used for disk-backed results where the webview only
+   * holds a window of rows; local counts are used for keys that are absent.
+   */
+  readonly groupCounts?: ReadonlyMap<string, number>;
+  /** Groups known to the host but not present in the loaded row window. */
+  readonly extraGroups?: readonly DataGridExtraGroup[];
+  /** True when the host could not enumerate every group (counts are lower bounds). */
+  readonly groupCountsPartial?: boolean;
   readonly onSelectionChange?: (selection: DataGridSelection | undefined) => void;
   readonly onContextMenu?: (context: DataGridCellContext) => void;
   readonly onCopySelection?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void;
@@ -317,6 +327,12 @@ export interface DataGridColumnMenuProps {
   readonly onViewChange: (patch: Partial<UiResultViewState>) => void;
 }
 
+export interface DataGridExtraGroup {
+  /** Formatted value at each grouping level, top-down. */
+  readonly path: readonly string[];
+  readonly count: number;
+}
+
 interface IndexedRow {
   readonly values: readonly unknown[];
   readonly sourceIndex: number;
@@ -327,6 +343,10 @@ interface RenderedGroup {
   readonly id: string;
   readonly label: string;
   readonly count: number;
+  /** The host supplied only a partial group enumeration; show the count as a lower bound. */
+  readonly partial?: boolean;
+  /** The group has rows in the result but none in the loaded window. */
+  readonly unloaded?: boolean;
   readonly ancestorIds: readonly string[];
   readonly level: number;
   /**
@@ -1061,12 +1081,37 @@ function overallSelectionColumnRange(
   return minColumn === undefined || maxColumn === undefined ? undefined : { minColumn, maxColumn };
 }
 
-function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow[], grouping: readonly string[], getCellMetadata?: CellMetadataResolver): readonly RenderedRow[] {
+/** Mirrors the DataGrid group id so host-supplied groups map to rendered bands. */
+function groupIdForPath(values: readonly string[]): string {
+  const ancestors: string[] = [];
+  let id = '';
+  for (const value of values) {
+    const valueKey = JSON.stringify(value);
+    id = JSON.stringify([...ancestors, valueKey]);
+    ancestors.push(id);
+  }
+  return id;
+}
+
+function groupRows(
+  columns: readonly DataGridColumn[],
+  rows: readonly IndexedRow[],
+  grouping: readonly string[],
+  getCellMetadata?: CellMetadataResolver,
+  groupCounts?: ReadonlyMap<string, number>,
+  extraGroups?: readonly DataGridExtraGroup[],
+  groupCountsPartial = false,
+): readonly RenderedRow[] {
   if (grouping.length === 0) return rows.map((row, displayIndex) => ({ ...row, kind: 'data', displayIndex, ancestorIds: [] }));
   const rendered: RenderedRow[] = [];
   let displayIndex = 0;
 
-  const appendLevel = (level: number, levelRows: readonly IndexedRow[], ancestorIds: readonly string[]): void => {
+  const appendLevel = (
+    level: number,
+    levelRows: readonly IndexedRow[],
+    ancestorIds: readonly string[],
+    ancestorValues: readonly string[],
+  ): void => {
     const groupingKey = grouping[level];
     if (groupingKey === undefined) {
       levelRows.forEach(row => {
@@ -1087,17 +1132,54 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
       if (existing) existing.rows.push(row);
       else groups.set(key, { value: formattedValue, rows: [row] });
     }
+    const emittedPaths = new Set<string>();
     for (const [valueKey, group] of groups) {
       const id = JSON.stringify([...ancestorIds, valueKey]);
+      const path = [...ancestorValues, group.value];
+      const pathKey = JSON.stringify(path);
+      emittedPaths.add(pathKey);
+      const authoritativeCount = groupCounts?.get(pathKey);
       const label = `${column?.name ?? groupingKey}: ${group.value}`;
       // Depth-first emission means the first data row of this group is the
       // next one emitted, so its 1-based ordinal is the current count + 1.
-      rendered.push({ kind: 'group', id, label, count: group.rows.length, ancestorIds, level, rowNumber: displayIndex + 1 });
-      appendLevel(level + 1, group.rows, [...ancestorIds, id]);
+      rendered.push({
+        kind: 'group',
+        id,
+        label,
+        count: authoritativeCount ?? group.rows.length,
+        partial: authoritativeCount === undefined && groupCountsPartial,
+        ancestorIds,
+        level,
+        rowNumber: displayIndex + 1,
+      });
+      appendLevel(level + 1, group.rows, [...ancestorIds, id], path);
+    }
+    for (const extra of extraGroups ?? []) {
+      if (extra.path.length !== level + 1) continue;
+      if (JSON.stringify(extra.path.slice(0, level)) !== JSON.stringify(ancestorValues)) continue;
+      const pathKey = JSON.stringify(extra.path);
+      if (emittedPaths.has(pathKey)) continue;
+      emittedPaths.add(pathKey);
+      const parentIds: string[] = [];
+      for (const value of extra.path.slice(0, level)) {
+        parentIds.push(JSON.stringify([...parentIds, JSON.stringify(value)]));
+      }
+      const id = groupIdForPath(extra.path);
+      rendered.push({
+        kind: 'group',
+        id,
+        label: `${column?.name ?? groupingKey}: ${extra.path[level]}`,
+        count: extra.count,
+        ancestorIds: parentIds,
+        level,
+        rowNumber: displayIndex + 1,
+        partial: groupCountsPartial,
+        unloaded: true,
+      });
     }
   };
 
-  appendLevel(0, rows, []);
+  appendLevel(0, rows, [], []);
   return rendered;
 }
 
@@ -1121,6 +1203,9 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
   view,
   onViewChange,
   clientProcessing = true,
+  groupCounts,
+  extraGroups,
+  groupCountsPartial = false,
   onSelectionChange,
   onContextMenu,
   onCopySelection,
@@ -1503,8 +1588,10 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
   // page/filter the input rows, but a group must still be a tree row in this
   // grid rather than a second aggregate table below it.
   const groupedRows = useMemo(
-    () => activeView.grouping.length > 0 ? groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata) : undefined,
-    [activeView.grouping, getCellMetadata, processedRows, resolvedColumns],
+    () => activeView.grouping.length > 0
+      ? groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata, groupCounts, extraGroups, groupCountsPartial)
+      : undefined,
+    [activeView.grouping, getCellMetadata, processedRows, resolvedColumns, groupCounts, extraGroups, groupCountsPartial],
   );
   /*
    * Groups render collapsed by default so adding a grouping column shows the
@@ -2746,6 +2833,7 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
                       className="ui-data-grid-group-toggle"
                       aria-label={`${expanded ? 'Collapse' : 'Expand'} group ${rendered.label}`}
                       aria-expanded={expanded}
+                      title={rendered.unloaded ? 'Rows for this group are not in the loaded window' : undefined}
                       onClick={() => setExpandedGroups(previous => {
                         const next = new Set(previous);
                         if (expanded) next.delete(rendered.id); else next.add(rendered.id);
@@ -2754,7 +2842,7 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
                     >
                       <span className="ui-data-grid-group-marker" aria-hidden="true" />
                       <span className="ui-data-grid-group-label">{rendered.label}</span>
-                      <span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span>
+                      <span className="ui-data-grid-group-count">{rendered.partial ? '~' : ''}{rendered.count.toLocaleString()} rows</span>
                     </button>
                   </div>
                 </td>
