@@ -5,7 +5,7 @@ audience: developer
 category: Developers
 status: Supported
 last_verified: 2026-09-26
-product_version: 3.22.4
+product_version: 3.23.0
 ---
 
 # Architecture and contracts

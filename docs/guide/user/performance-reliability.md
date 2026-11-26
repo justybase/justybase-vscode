@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-11-13
-product_version: 3.22.4
+product_version: 3.23.0
 ---
 
 # Performance and reliability
