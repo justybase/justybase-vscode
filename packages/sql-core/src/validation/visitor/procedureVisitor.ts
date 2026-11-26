@@ -443,6 +443,206 @@ function tokenImage(token: IToken | undefined): string {
   return (token?.image ?? '').replace(/^"|"$/g, '').toUpperCase();
 }
 
+function isDb2NameToken(token: IToken | undefined): boolean {
+  return token?.tokenType.name === "Identifier" || token?.tokenType.name === "QuotedIdentifier";
+}
+
+/**
+ * Db2 SQL PL units keep bodies as an offset-stable token sequence, so the
+ * scope checks work on the ordered tokens instead of a structural CST.
+ */
+export function db2ProcedureUnit(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  const tokens: IToken[] = [];
+  for (const values of Object.values(ctx)) {
+    collectDb2ProcedureTokens(host, values, tokens);
+  }
+  tokens.sort((left, right) => (left.startOffset ?? 0) - (right.startOffset ?? 0));
+
+  const previousContext = host.getInProcedureContext();
+  host.setInProcedureContext(true);
+  host.getScopeBuilder().enterScope();
+  const scope = new ProcedureScopeBuilder();
+  // CREATE PROCEDURE has no RETURNS in Db2, so SQL038 never applies here.
+  scope.setMissingReturnCheckEnabled(false);
+  host.setProcedureScope(scope);
+  try {
+    scanDb2ProcedureTokens(scope, tokens);
+    for (const diagnostic of scope.finalize()) {
+      host.addError(diagnostic.message, diagnostic.token, diagnostic.severity, diagnostic.code);
+    }
+  } finally {
+    host.setProcedureScope(null);
+    host.getScopeBuilder().exitScope();
+    host.setInProcedureContext(previousContext);
+  }
+}
+
+/**
+ * Trigger bodies use the same SQL PL token soup as procedure bodies. Reuse the
+ * scanner so standalone SELECT / unused DECLARE diagnostics apply there too.
+ */
+export function db2CreateTriggerStatement(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  const tokens: IToken[] = [];
+  for (const values of Object.values(ctx)) {
+    collectDb2ProcedureTokens(host, values, tokens);
+  }
+  tokens.sort((left, right) => (left.startOffset ?? 0) - (right.startOffset ?? 0));
+
+  const previousContext = host.getInProcedureContext();
+  host.setInProcedureContext(true);
+  host.getScopeBuilder().enterScope();
+  const scope = new ProcedureScopeBuilder();
+  scope.setMissingReturnCheckEnabled(false);
+  host.setProcedureScope(scope);
+  try {
+    scanDb2ProcedureTokens(scope, tokens);
+    for (const diagnostic of scope.finalize()) {
+      host.addError(diagnostic.message, diagnostic.token, diagnostic.severity, diagnostic.code);
+    }
+  } finally {
+    host.setProcedureScope(null);
+    host.getScopeBuilder().exitScope();
+    host.setInProcedureContext(previousContext);
+  }
+}
+
+function collectDb2ProcedureTokens(
+  host: ProcedureVisitorHost,
+  value: unknown,
+  result: IToken[],
+): void {
+  if (!value) return;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectDb2ProcedureTokens(host, item, result));
+    return;
+  }
+  if (host.isToken(value)) {
+    result.push(value);
+    return;
+  }
+  const children = (value as CstNode).children;
+  if (children) {
+    Object.values(children).forEach((child) => collectDb2ProcedureTokens(host, child, result));
+  }
+}
+
+function startsStandaloneDb2Select(tokens: readonly IToken[], index: number): boolean {
+  const previous = tokenImage(tokens[index - 1]);
+  return !["INSERT", "INTO", "WITH", "FOR", "AS", "DECLARE", "OPEN", "FETCH", "CALL"].includes(previous);
+}
+
+/**
+ * `INSERT … SELECT` and `WITH … SELECT` belong to a DML statement, not to a
+ * standalone result-returning SELECT. Track them until the statement ends.
+ */
+function startsDb2DmlWithSelect(image: string): boolean {
+  return image === "INSERT" || image === "WITH";
+}
+
+export function scanDb2ProcedureTokens(scope: ProcedureScopeBuilder, tokens: readonly IToken[]): void {
+  const beginIndex = tokens.findIndex((token) => tokenImage(token) === "BEGIN");
+  const headerEnd = beginIndex >= 0 ? beginIndex : tokens.length;
+
+  // Header parameters live inside the parenthesized signature, so depth does
+  // not apply here.
+  const parameterNames = new Set<string>();
+  for (let index = 0; index < headerEnd; index += 1) {
+    const image = tokenImage(tokens[index]);
+    if (!["IN", "OUT", "INOUT"].includes(image) || !isDb2NameToken(tokens[index + 1])) continue;
+    const nameToken = tokens[index + 1];
+    const name = unquoteIdentifier(nameToken.image ?? "").toUpperCase();
+    parameterNames.add(name);
+    scope.registerParameter(name, image as ProcedureParamMode, nameToken);
+    index += 1;
+  }
+
+  const markUsed = (name: string): void => {
+    // Plain reads must not satisfy the OUT/INOUT assignment check.
+    if (!parameterNames.has(name.toUpperCase())) scope.markNameUsed(name);
+  };
+
+  let depth = 0;
+  let ownsNextSelect = false;
+  for (let index = headerEnd; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const image = tokenImage(token);
+    if (image === ";") {
+      ownsNextSelect = false;
+      continue;
+    }
+    if (depth === 0 && startsDb2DmlWithSelect(image)) ownsNextSelect = true;
+    if (image === "(") {
+      depth += 1;
+      continue;
+    }
+    if (image === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth > 0) {
+      if (isDb2NameToken(token)) markUsed(unquoteIdentifier(token.image ?? ""));
+      continue;
+    }
+
+    if (
+      image === "DECLARE"
+      && isDb2NameToken(tokens[index + 1])
+      && !["HANDLER", "CURSOR"].includes(tokenImage(tokens[index + 2]))
+    ) {
+      const nameToken = tokens[index + 1];
+      scope.registerVariable(unquoteIdentifier(nameToken.image ?? ""), nameToken);
+      index += 1;
+      continue;
+    }
+
+    if (image === "SET" && isDb2NameToken(tokens[index + 1])) {
+      const nameToken = tokens[index + 1];
+      scope.markNameAssigned(unquoteIdentifier(nameToken.image ?? ""));
+      index += 1;
+      continue;
+    }
+
+    if (image === "RETURN") {
+      scope.setHasReturn();
+      continue;
+    }
+
+    if (image === "SELECT" && !ownsNextSelect && startsStandaloneDb2Select(tokens, index)) {
+      let hasInto = false;
+      let intoIndex = -1;
+      let end = index + 1;
+      for (; end < tokens.length; end += 1) {
+        const nextImage = tokenImage(tokens[end]);
+        if (nextImage === "INTO") {
+          hasInto = true;
+          intoIndex = end;
+          continue;
+        }
+        if (nextImage === ";" || nextImage === "END") break;
+      }
+      if (intoIndex >= 0) {
+        for (let targetIndex = intoIndex + 1; targetIndex < end; targetIndex += 1) {
+          const target = tokens[targetIndex];
+          if (tokenImage(target) === "FROM") break;
+          if (isDb2NameToken(target)) scope.markNameAssigned(unquoteIdentifier(target.image ?? ""));
+        }
+      }
+      scope.checkStandaloneSelect(token, hasInto);
+      continue;
+    }
+
+    if (isDb2NameToken(token)) {
+      markUsed(unquoteIdentifier(token.image ?? ""));
+    }
+  }
+}
+
 export function oracleBlockStatement(
   host: ProcedureVisitorHost,
   ctx: Record<string, CstNode[]>,

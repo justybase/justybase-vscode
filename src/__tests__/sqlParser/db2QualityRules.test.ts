@@ -87,6 +87,81 @@ describe('Db2 quality rules', () => {
 		expect(result.issues.map((issue) => issue.ruleId)).toContain('DB2007');
 	});
 
+	it('emits SQL037/SQL039/SQL040 for Db2 SQL PL units', () => {
+		const validator = new SqlValidator(undefined, db2SqlAuthoring.validation);
+		const procedure = [
+			'CREATE PROCEDURE app.p (IN p_in INTEGER, OUT p_out INTEGER)',
+			'LANGUAGE SQL',
+			'BEGIN',
+			'  DECLARE v_unused INTEGER;',
+			'  DECLARE v_used INTEGER DEFAULT 0;',
+			'  SET v_used = p_in;',
+			'  SET p_out = v_used;',
+			'  SELECT id INTO v_used FROM app.t WHERE id = p_in;',
+			'  SELECT id FROM app.t;',
+			'  RETURN;',
+			'END',
+		].join('\n');
+		const warnings = validator.validate(procedure).warnings.map(warning => warning.code);
+		expect(warnings).toContain('SQL037');
+		expect(warnings).toContain('SQL039');
+		expect(warnings).not.toContain('SQL040');
+		expect(warnings).not.toContain('SQL038');
+
+		const clean = [
+			'CREATE PROCEDURE app.p (IN p_in INTEGER, OUT p_out INTEGER)',
+			'LANGUAGE SQL',
+			'BEGIN',
+			'  DECLARE v_used INTEGER DEFAULT 0;',
+			'  SET v_used = p_in;',
+			'  SET p_out = v_used;',
+			'  SELECT id INTO v_used FROM app.t;',
+			'END',
+		].join('\n');
+		expect(validator.validate(clean).warnings.map(warning => warning.code)).toEqual([]);
+	});
+
+	it('does not flag Db2 INSERT…SELECT or nested SELECT as SQL037', () => {
+		const validator = new SqlValidator(undefined, db2SqlAuthoring.validation);
+		const sql = [
+			'CREATE PROCEDURE app.p (IN p_in INTEGER)',
+			'LANGUAGE SQL',
+			'BEGIN',
+			'  INSERT INTO app.t (id) SELECT p_in FROM SYSIBM.SYSDUMMY1;',
+			'END',
+		].join('\n');
+		expect(validator.validate(sql).warnings.map(warning => warning.code)).toEqual([]);
+	});
+
+	it('reports SQL040 for an unassigned Db2 OUT parameter', () => {
+		const validator = new SqlValidator(undefined, db2SqlAuthoring.validation);
+		const sql = [
+			'CREATE PROCEDURE app.p (OUT p_out INTEGER)',
+			'LANGUAGE SQL',
+			'BEGIN',
+			'  DECLARE v INT DEFAULT 1;',
+			'  SET v = 2;',
+			'END',
+		].join('\n');
+		expect(validator.validate(sql).warnings.map(warning => warning.code)).toContain('SQL040');
+	});
+
+	it('reports SQL037 for a standalone SELECT in a Db2 trigger body', () => {
+		const validator = new SqlValidator(undefined, db2SqlAuthoring.validation);
+		const trigger = [
+			'CREATE TRIGGER app.trg AFTER INSERT ON app.t',
+			'REFERENCING NEW AS N FOR EACH ROW MODE DB2SQL',
+			'BEGIN ATOMIC',
+			'  SELECT id FROM app.t;',
+			'  SET N.amount = 0;',
+			'END',
+		].join('\n');
+		expect(validator.validate(trigger).warnings.map(warning => warning.code)).toContain('SQL037');
+
+		const clean = trigger.replace('SELECT id FROM app.t;', 'SELECT id INTO v_id FROM app.t;');
+		expect(validator.validate(clean).warnings.map(warning => warning.code)).toEqual([]);
+	});
+
 	it('emits SQL004 and SQL025 against an in-memory Db2 schema', () => {
 		const schemaProvider = new InMemorySchemaProvider(true);
 		schemaProvider.addTable({

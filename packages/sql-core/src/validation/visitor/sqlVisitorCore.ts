@@ -1347,7 +1347,9 @@ export class SqlVisitor
   db2IndexKeyColumn(): void { /* Index keys are not query rows. */ }
   db2RenameTableStatement(): void { /* Rename targets carry no query scope. */ }
   db2AdminCommandStatement(): void { /* Utility options have no query scope. */ }
-  db2CreateTriggerStatement(): void { /* Trigger bodies compile in their own scope. */ }
+  db2CreateTriggerStatement(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.db2CreateTriggerStatement(this, ctx);
+  }
   db2LabelStatement(): void { /* Label text is a literal. */ }
   db2ExportStatement(ctx: Record<string, CstNode[]>): void {
     for (const node of ctx.selectStatement ?? []) this.visit(node);
@@ -1377,7 +1379,9 @@ export class SqlVisitor
   db2DeclareGlobalTempTable(): void { /* Temporary-table declaration has no query scope. */ }
   db2ExecuteImmediateStatement(): void { /* Dynamic SQL text is a literal. */ }
   db2CursorStatement(): void { /* Cursor control has no query scope. */ }
-  db2ProcedureUnit(): void { /* SQL PL units compile in their own scope. */ }
+  db2ProcedureUnit(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.db2ProcedureUnit(this, ctx);
+  }
   db2ProgramToken(): void { /* Body token soup carries no query scope. */ }
   db2ProgramKeyword(): void { /* Body token soup carries no query scope. */ }
   db2IsolationClause(): void { /* Isolation level is a physical hint. */ }
