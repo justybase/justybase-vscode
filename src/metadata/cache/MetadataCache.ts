@@ -880,6 +880,45 @@ export class MetadataCache implements MetadataPrefetchTarget {
   ): string | undefined {
     const key = `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`;
     const entry = this._store.defaultSchemaCache.get(key);
+
+    // Netezza: DEFSCHEMA is captured with the database layer during prefetch
+    // and persisted with it. Prefer that catalog value over any older cached
+    // fallback (notably the former `ADMIN` fallback written after a failed
+    // live query), so DB.. completion stops re-querying the server.
+    if (this.isNetezzaConnection(connectionName)) {
+      const databaseEntry = this._store.dbCache.get(connectionName);
+      // An exact cache part already carries the catalog spelling, so it must
+      // not be folded like unquoted user input.
+      const exactPart = isNetezzaExactCachePart(dbName);
+      const lookupName = exactPart ? decodeNetezzaCacheDatabasePart(dbName) : dbName;
+      const requested = exactPart
+        ? createNetezzaCatalogIdentifier(lookupName)
+        : createNetezzaUserIdentifier(lookupName);
+      const catalogRow = databaseEntry?.data.find((database) => {
+        const catalogName = String(database.DATABASE || database.label || '').trim();
+        if (!catalogName) {
+          return false;
+        }
+        // `requested.value` is already folded for unquoted input and exact
+        // for quoted input, so comparing the raw catalog spelling keeps
+        // `baza` -> BAZA and `"MixedCase"` -> MixedCase distinct.
+        return catalogName === requested.value;
+      });
+      const catalogDefaultSchema = typeof catalogRow?.DEFSCHEMA === 'string'
+        ? catalogRow.DEFSCHEMA.trim()
+        : '';
+      if (catalogDefaultSchema) {
+        if (!entry || entry.data !== catalogDefaultSchema) {
+          this._store.defaultSchemaCache.set(key, {
+            data: catalogDefaultSchema,
+            timestamp: databaseEntry?.timestamp ?? Date.now(),
+          });
+        }
+        this._stats.recordHit(connectionName, "schema");
+        return catalogDefaultSchema;
+      }
+    }
+
     if (!entry) {
       this._stats.recordMiss(connectionName, "schema");
       return undefined;

@@ -77,6 +77,7 @@ export class CompletionMetadataResolver {
     includeViews = false,
     effectiveSchema?: string,
     personalizeFromObjects = false,
+    netezzaSchemasEnabled?: boolean,
   ): Promise<CompletionItem[]> {
     if (databaseKind === "netezza") {
       context = normalizeNetezzaFromJoinContext(context);
@@ -179,11 +180,15 @@ export class CompletionMetadataResolver {
       // Netezza `DB..TABLE` resolves in that database's DEFSCHEMA. Offering
       // objects from other schemas would insert a name that silently rewrites
       // the intended schema, so the list is constrained to the default schema.
-      const defaultSchema = await this.resolveNetezzaDoubleDotSchema(
-        documentUri,
-        context.dbName,
-        databaseKind,
-      );
+      // When schema mode is disabled there is no separate DEFSCHEMA lookup:
+      // the database's single namespace is served by the all-schemas cache.
+      const defaultSchema = netezzaSchemasEnabled === false
+        ? undefined
+        : await this.resolveNetezzaDoubleDotSchema(
+          documentUri,
+          context.dbName,
+          databaseKind,
+        );
       return this.getTableLikeCompletions(
         documentUri,
         context.dbName,
@@ -275,6 +280,7 @@ export class CompletionMetadataResolver {
     effectiveDb: string | undefined,
     databaseKind?: DatabaseKind,
     effectiveSchema?: string,
+    netezzaSchemasEnabled?: boolean,
   ): Promise<CompletionItem[]> {
     if (databaseKind === "netezza") {
       context = normalizeNetezzaFromJoinContext(context);
@@ -353,11 +359,13 @@ export class CompletionMetadataResolver {
       if (!supportsDoubleDotPath(databaseKind)) {
         return [];
       }
-      const defaultSchema = await this.resolveNetezzaDoubleDotSchema(
-        documentUri,
-        context.dbName,
-        databaseKind,
-      );
+      const defaultSchema = netezzaSchemasEnabled === false
+        ? undefined
+        : await this.resolveNetezzaDoubleDotSchema(
+          documentUri,
+          context.dbName,
+          databaseKind,
+        );
       const views = await this.metadataProvider.getViews(
         documentUri,
         context.dbName,
@@ -432,6 +440,7 @@ export class CompletionMetadataResolver {
     effectiveDb: string | undefined,
     databaseKind?: DatabaseKind,
     effectiveSchema?: string,
+    netezzaSchemasEnabled?: boolean,
   ): Promise<CompletionItem[]> {
     if (databaseKind === "netezza") {
       context = normalizeNetezzaFromJoinContext(context);
@@ -510,11 +519,13 @@ export class CompletionMetadataResolver {
       if (!supportsDoubleDotPath(databaseKind)) {
         return [];
       }
-      const defaultSchema = await this.resolveNetezzaDoubleDotSchema(
-        documentUri,
-        context.dbName,
-        databaseKind,
-      );
+      const defaultSchema = netezzaSchemasEnabled === false
+        ? undefined
+        : await this.resolveNetezzaDoubleDotSchema(
+          documentUri,
+          context.dbName,
+          databaseKind,
+        );
       const procedures = await this.metadataProvider.getProcedures(
         documentUri,
         context.dbName,

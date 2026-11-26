@@ -68,9 +68,10 @@ describe('metadata/systemQueries', () => {
     });
 
     describe('NZ_QUERIES.LIST_DATABASES', () => {
-        it('should be a valid SQL query', () => {
+        it('should be a valid SQL query that carries the default schema', () => {
             expect(NZ_QUERIES.LIST_DATABASES).toContain('SELECT');
             expect(NZ_QUERIES.LIST_DATABASES).toContain('DATABASE');
+            expect(NZ_QUERIES.LIST_DATABASES).toContain('DEFSCHEMA');
             expect(NZ_QUERIES.LIST_DATABASES).toContain(NZ_SYSTEM_VIEWS.DATABASE);
         });
     });

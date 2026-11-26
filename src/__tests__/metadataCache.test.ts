@@ -87,6 +87,46 @@ describe("MetadataCache", () => {
       expect(netezzaCache.getTables("conn1", upperKey)).not.toBe(lowerTable);
     });
 
+    it("resolves the default schema from the cached database DEFSCHEMA over a stale fallback", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      netezzaCache.setDatabases("conn1", [{
+        DATABASE: "BAZA",
+        DEFSCHEMA: "PUBLIC",
+        label: "BAZA",
+        kind: 9,
+      }]);
+
+      expect(netezzaCache.getDefaultSchema("conn1", "BAZA")).toBe("PUBLIC");
+
+      // Mirrors the old poisoned cache entry written after a failed live
+      // DEFSCHEMA query; the catalog layer must win.
+      netezzaCache.setDefaultSchema("conn1", "BAZA", "ADMIN");
+      expect(netezzaCache.getDefaultSchema("conn1", "BAZA")).toBe("PUBLIC");
+    });
+
+    it("resolves an exact-case Netezza DEFSCHEMA for quoted database names only", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      netezzaCache.setDatabases("conn1", [{
+        DATABASE: "MixedCase",
+        DEFSCHEMA: "PUBLIC",
+        label: "MixedCase",
+        kind: 9,
+      }]);
+
+      expect(netezzaCache.getDefaultSchema("conn1", '"MixedCase"')).toBe("PUBLIC");
+      // Unquoted input folds to upper case and must not match the exact
+      // catalog spelling.
+      expect(netezzaCache.getDefaultSchema("conn1", "mixedcase")).toBeUndefined();
+      expect(netezzaCache.getDefaultSchema(
+        "conn1",
+        buildNetezzaCacheDatabasePart("MixedCase"),
+      )).toBe("PUBLIC");
+    });
+
     it("revives an exact lower-case Netezza database when the catalog sees it again", () => {
       const netezzaCache = new MetadataCache(mockContext, {
         getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),

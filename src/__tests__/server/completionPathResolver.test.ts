@@ -67,6 +67,7 @@ describe("CompletionPathResolver", () => {
       true,
       "PUBLIC",
       true,
+      undefined,
     );
   });
 

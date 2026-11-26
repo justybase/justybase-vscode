@@ -51,6 +51,22 @@ describe("completionPathUtils Netezza double-dot lookup", () => {
     });
   });
 
+  it("schemas ON with an unknown DEFSCHEMA omits the schema instead of assuming ADMIN", () => {
+    const targets = buildMetadataLookupTargets(
+      source,
+      "JUST_DATA",
+      "ADMIN",
+      "netezza",
+      { netezzaSchemasEnabled: true },
+    );
+
+    expect(targets[0]).toEqual({
+      database: "JUST_DATA_5",
+      schema: undefined,
+      table: "DIMACCOUNT_NS",
+    });
+  });
+
   it("unqualified table still uses effectiveSchema", () => {
     const targets = buildMetadataLookupTargets(
       { table: "DIMACCOUNT_NS" },

@@ -1045,7 +1045,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
     it('should execute full suite of prefetch logic for a connection', async () => {
       // Setup DB mock
       mockRunQuery.mockResolvedValueOnce({
-        columns: [{ name: 'DATABASE' }], data: [['db1']]
+        columns: [{ name: 'DATABASE' }, { name: 'DEFSCHEMA' }], data: [['db1', 'ADMIN']]
       })
         // Schemas mock
         .mockResolvedValueOnce({
@@ -1077,7 +1077,9 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       await new Promise(process.nextTick);
       await new Promise(process.nextTick);
 
-      expect(mockCache.setDatabases).toHaveBeenCalled();
+      expect(mockCache.setDatabases).toHaveBeenCalledWith(connName, [
+        expect.objectContaining({ DATABASE: 'db1', DEFSCHEMA: 'ADMIN' }),
+      ]);
       expect(mockCache.setSchemas).toHaveBeenCalled();
       expect(mockCache.releasePrefetchLock).toHaveBeenCalledWith(expect.objectContaining({ connectionName: connName }));
     });

@@ -306,7 +306,7 @@ describeIfDb("Netezza DB..TABLE completion - live", () => {
       },
     );
 
-    expect(targets[0].schema).toBe(defaultSchema?.toUpperCase());
+    expect(targets[0].schema).toBe(defaultSchema);
   });
 
   itIfDb("schemas-OFF lookup omits schema for cross-schema search", () => {
@@ -490,7 +490,7 @@ describeIfDb("Netezza DB..TABLE completion - live", () => {
         {
           database: TARGET_DATABASE,
           table: TARGET_TABLE,
-          schema: defaultSchema.toUpperCase(),
+          schema: defaultSchema,
         },
       ]);
       expect(columnLabels(items)).not.toEqual(

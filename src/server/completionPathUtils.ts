@@ -152,7 +152,10 @@ function resolveMetadataLookupTarget(
     if (lookupOptions?.netezzaSchemasEnabled === true) {
       return {
         database: source.db,
-        schema: lookupOptions.netezzaDefaultSchemaForDatabase || "ADMIN",
+        // DEFSCHEMA is authoritative. When it is unknown (old snapshot or a
+        // failed lookup) leave the schema out so the host resolves DB..TABLE
+        // from the cached object/catalog instead of silently looking in ADMIN.
+        schema: lookupOptions.netezzaDefaultSchemaForDatabase || undefined,
         table: source.table,
       };
     }

@@ -326,13 +326,17 @@ export class MetadataProvider {
             });
             if (!result) return [];
 
-            const results = queryResultToRows<{ DATABASE: string }>(result);
-            const items: DatabaseMetadata[] = results.map(row => ({
-                DATABASE: row.DATABASE,
-                label: row.DATABASE,
-                kind: 9, // Module
-                detail: 'Database'
-            }));
+            const results = queryResultToRows<{ DATABASE: string; DEFSCHEMA?: string | null }>(result);
+            const items: DatabaseMetadata[] = results.map(row => {
+                const defaultSchema = typeof row.DEFSCHEMA === 'string' ? row.DEFSCHEMA.trim() : '';
+                return {
+                    DATABASE: row.DATABASE,
+                    label: row.DATABASE,
+                    kind: 9, // Module
+                    detail: 'Database',
+                    ...(defaultSchema ? { DEFSCHEMA: defaultSchema } : {}),
+                };
+            });
 
             this.metadataCache.setDatabases(connectionName, items);
 

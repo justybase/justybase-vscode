@@ -2739,11 +2739,23 @@ export class CachePrefetcher {
         forceRefresh = false,
         lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<string[]> {
-        if (!forceRefresh && this.cache.getDatabases(connectionName)) {
-            const cached = this.cache.getDatabases(connectionName);
-            const dbNames = cached?.map((item) => extractLabel(item)).filter(Boolean) as string[] || [];
-            Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Databases: ${dbNames.length} from cache: ${dbNames.join(', ')}`);
-            return dbNames;
+        const cachedDatabases = !forceRefresh ? this.cache.getDatabases(connectionName) : undefined;
+        const cachedDbNames = cachedDatabases
+            ? (cachedDatabases.map((item) => extractLabel(item)).filter(Boolean) as string[])
+            : undefined;
+        if (cachedDatabases) {
+            const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+            // Older snapshots stored only DATABASE. Without DEFSCHEMA, DB..
+            // completion has to resolve the default schema separately. Re-read
+            // the tiny database list once so the cached layer becomes
+            // authoritative for default-schema lookups.
+            const needsDefaultSchemaBackfill = preserveCatalogIdentity
+                && cachedDatabases.some(item => String(item.DEFSCHEMA ?? '').trim().length === 0);
+            if (!needsDefaultSchemaBackfill) {
+                const dbNames = cachedDbNames ?? [];
+                Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Databases: ${dbNames.length} from cache: ${dbNames.join(', ')}`);
+                return dbNames;
+            }
         }
 
         try {
@@ -2759,15 +2771,21 @@ export class CachePrefetcher {
                 },
                 lifecycle,
             );
-            if (!result) return [];
+            // A failed DEFSCHEMA backfill must not hide the databases that are
+            // already cached; the next prefetch retries the tiny lookup.
+            if (!result) return cachedDbNames ?? [];
 
             const results = queryResultToRows<RawDatabaseRow>(result);
-            const items = results.map((row) => ({
-                DATABASE: row.DATABASE,
-                label: row.DATABASE,
-                kind: 9,
-                detail: 'Database'
-            }));
+            const items = results.map((row) => {
+                const defaultSchema = typeof row.DEFSCHEMA === 'string' ? row.DEFSCHEMA.trim() : '';
+                return {
+                    DATABASE: row.DATABASE,
+                    label: row.DATABASE,
+                    kind: 9,
+                    detail: 'Database',
+                    ...(defaultSchema ? { DEFSCHEMA: defaultSchema } : {}),
+                };
+            });
 
             this.cache.setDatabases(connectionName, items);
             const dbNames = results.map(row => row.DATABASE);
@@ -2775,7 +2793,7 @@ export class CachePrefetcher {
             return dbNames;
         } catch (e: unknown) {
             logPrefetchError('[CachePrefetcher] prefetchDatabases error:', e);
-            return [];
+            return cachedDbNames ?? [];
         }
     }
 

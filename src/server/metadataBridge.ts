@@ -869,8 +869,7 @@ export class MetadataBridge {
         // still running.  Do not turn that transient miss into a 12-hour
         // negative cache entry, otherwise completion stays empty after the
         // host cache is populated.
-        const isNetezzaCacheOnly =
-          this.documentDatabaseKinds.get(docEpochKey) === "netezza";
+        const isNetezzaCacheOnly = this.isNetezzaDocumentContext(docEpochKey);
         if (data.length > 0 || !isNetezzaCacheOnly) {
           this.listCache.set(cacheKey, { data, timestamp: Date.now() });
         }
@@ -886,10 +885,25 @@ export class MetadataBridge {
   }
 
   private requestList(params: MetadataRequestParams): Promise<MetadataResponse> {
-    if (this.documentDatabaseKinds.get(params.documentUri) === "netezza") {
+    if (this.isNetezzaDocumentContext(params.documentUri)) {
       return this.request({ ...params, cacheOnly: true });
     }
     return this.request(params);
+  }
+
+  /**
+   * Netezza list requests are cache-only. The context request normally runs
+   * first, but a completion can race a brand-new tab before its context is
+   * registered; fall back to the connection kind so a transient empty cache
+   * is never stored as a 12-hour negative entry or sent as a live query.
+   */
+  private isNetezzaDocumentContext(documentUri: string): boolean {
+    if (this.documentDatabaseKinds.get(documentUri) === "netezza") {
+      return true;
+    }
+    const connectionName = this.documentConnectionNames.get(documentUri);
+    return connectionName !== undefined
+      && this.connectionDatabaseKinds.get(connectionName) === "netezza";
   }
 
   private extractDocUri(cacheKey: string): string {

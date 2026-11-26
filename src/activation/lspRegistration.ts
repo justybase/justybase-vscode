@@ -4,7 +4,9 @@ import type { DatabaseKind } from "../contracts/database";
 import type { ConnectionManager } from "../core/connectionManager";
 import type { MetadataCache } from "../metadataCache";
 import { getCachedColumnsFromMetadataCacheAsync } from "../metadata/columnCacheLookup";
+import { createConnectionScopedMetadataQueryRunner } from "../metadata/connectionScopedMetadataQueryRunner";
 import { getTablesForScope } from "../metadata/cache/schemaTreeDataSource";
+import { METADATA_QUERY_TIMEOUT_SECONDS } from "../metadata/metadataQueryLimiter";
 import { normalizeEstimatedRowCount } from "../metadata/estimatedRowCount";
 import { extractLabel, inferObjectType } from "../metadata/helpers";
 import { parseProcedureArgumentNames } from "../metadata/procedureSignatureUtils";
@@ -525,11 +527,11 @@ export async function handleMetadataRequest(
           metadataCache,
           params.cacheOnly,
         );
-      case "tables":
+      case "tables": {
         if (!connectionName || !effectiveDatabase) {
           return [];
         }
-        return await getTables(
+        const items = await getTables(
           connectionName,
           effectiveDatabase,
           params.schema,
@@ -538,11 +540,22 @@ export async function handleMetadataRequest(
           "table",
           params.cacheOnly,
         );
-      case "views":
+        if (params.cacheOnly && items.length === 0) {
+          ensureDatabaseShadowSnapshot(
+            connectionName,
+            effectiveDatabase,
+            context,
+            connectionManager,
+            metadataCache,
+          );
+        }
+        return items;
+      }
+      case "views": {
         if (!connectionName || !effectiveDatabase) {
           return [];
         }
-        return await getTables(
+        const items = await getTables(
           connectionName,
           effectiveDatabase,
           params.schema,
@@ -551,11 +564,22 @@ export async function handleMetadataRequest(
           "view",
           params.cacheOnly,
         );
-      case "sourceObjects":
+        if (params.cacheOnly && items.length === 0) {
+          ensureDatabaseShadowSnapshot(
+            connectionName,
+            effectiveDatabase,
+            context,
+            connectionManager,
+            metadataCache,
+          );
+        }
+        return items;
+      }
+      case "sourceObjects": {
         if (!connectionName || !effectiveDatabase) {
           return [];
         }
-        return await getSourceObjects(
+        const items = await getSourceObjects(
           connectionName,
           effectiveDatabase,
           params.schema,
@@ -563,11 +587,22 @@ export async function handleMetadataRequest(
           metadataCache,
           params.cacheOnly,
         );
-      case "procedures":
+        if (params.cacheOnly && items.length === 0) {
+          ensureDatabaseShadowSnapshot(
+            connectionName,
+            effectiveDatabase,
+            context,
+            connectionManager,
+            metadataCache,
+          );
+        }
+        return items;
+      }
+      case "procedures": {
         if (!connectionName || !effectiveDatabase) {
           return [];
         }
-        return await getProcedures(
+        const items = await getProcedures(
           connectionName,
           effectiveDatabase,
           params.schema,
@@ -575,6 +610,17 @@ export async function handleMetadataRequest(
           metadataCache,
           params.cacheOnly,
         );
+        if (params.cacheOnly && items.length === 0) {
+          ensureDatabaseShadowSnapshot(
+            connectionName,
+            effectiveDatabase,
+            context,
+            connectionManager,
+            metadataCache,
+          );
+        }
+        return items;
+      }
       case "columns":
         if (!connectionName || !effectiveDatabase || !params.table) {
           return [];
@@ -634,15 +680,17 @@ export async function handleMetadataRequest(
         return null;
       case "netezzaDefaultSchema":
         if (!connectionName || !effectiveDatabase) {
-          return "ADMIN";
+          return null;
         }
-        return resolveNetezzaDefaultSchema(
+        // Cache-first: DEFSCHEMA travels with the database layer. A missing
+        // value must not block authoring on a live catalog query.
+        return (await resolveNetezzaDefaultSchema(
           connectionName,
           effectiveDatabase,
           connectionManager,
           metadataCache,
           context,
-        );
+        )) ?? null;
       case "qualifyTable": {
         if (!params.table) {
           return [];
@@ -813,6 +861,42 @@ async function getSchemas(
     });
   }
   return items;
+}
+
+/**
+ * A cache-only authoring request for a database that was intentionally left
+ * lazy must start its shadow snapshot instead of returning an empty list
+ * forever. The prefetcher already coalesces concurrent/fresh attempts, so a
+ * burst of completion requests cannot fan out into parallel refreshes.
+ */
+function ensureDatabaseShadowSnapshot(
+  connectionName: string,
+  database: string,
+  context: vscode.ExtensionContext,
+  connectionManager: ConnectionManager,
+  metadataCache: MetadataCache,
+): void {
+  if (!metadataCache.supportsLegacyMetadataPrefetch(connectionName)
+    || metadataCache.isDatabaseSnapshotFresh(connectionName, database)
+    || metadataCache.hasDatabasePrefetchInProgress(connectionName, database)) {
+    return;
+  }
+  void metadataCache.triggerDatabasePrefetch(
+    connectionName,
+    database,
+    createConnectionScopedMetadataQueryRunner({
+      context,
+      connectionManager,
+      connectionName,
+      maxRows: 1_000_000,
+      timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+    }),
+  ).catch((error: unknown) => {
+    getLogger().warn(
+      `[Metadata] Failed to warm ${connectionName}/${database} for cache-only completion`,
+      error,
+    );
+  });
 }
 
 async function getTables(

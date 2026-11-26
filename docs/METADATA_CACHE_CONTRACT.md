@@ -171,6 +171,33 @@ gate. A connection can therefore hold a mix of fresh and missing databases.
   flags, so a known-empty scope is an authoritative cache hit (`[]`), not a
   reason to query again.
 
+### Netezza default schema (`DB..`)
+
+The database layer stores `DATABASE` and `DEFSCHEMA` together (stage 1 reads
+both from `_V_DATABASE`), and the same pair is persisted in the serialized
+connection payload and its manifest. The in-memory `defaultSchemaCache` is a
+derived per-key view and is not persisted on its own: `DEFSCHEMA` is the
+durable source of truth, so the remembered default schema survives a restart
+with the database layer. `MetadataCache.getDefaultSchema` prefers that catalog
+value over any older per-key cache entry, so a legacy synthetic `ADMIN`
+fallback cannot hide the real default schema. Matching keeps Netezza
+identifier semantics: unquoted input folds to upper case while quoted input
+matches the catalog spelling exactly.
+
+`DB..TABLE` completion and column lookup therefore resolve the default schema
+from RAM, not from a live catalog query. When an old snapshot has no
+`DEFSCHEMA`, completion falls back to the cached all-schemas object list and a
+single background lookup (15 s timeout, metadata query limiter) fills the value
+for the next request. A failed lookup is never cached as `ADMIN` and is not
+retried on every keystroke; recovery backs off for 60 seconds. If a column
+lookup for `DB..TABLE` runs before the value is known, it omits the schema and
+lets the host resolve the table from the cached object/catalog instead of
+guessing `ADMIN`.
+
+Cache-only completion for a database that was deliberately left lazy starts a
+database shadow snapshot instead of returning an empty list forever; the
+normal per-database freshness/in-progress guards coalesce the requests.
+
 ### Live fallback policy
 
 `justybase.metadata.liveFallback` decides whether an authoring cache miss may

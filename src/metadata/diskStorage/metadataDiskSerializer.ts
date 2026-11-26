@@ -31,7 +31,7 @@ import {
     type SerializedStringLayerEntry,
 } from './metadataDiskTypes';
 
-const KNOWN_DATABASE_KEYS = new Set(['DATABASE', 'label', 'detail', 'kind']);
+const KNOWN_DATABASE_KEYS = new Set(['DATABASE', 'DEFSCHEMA', 'label', 'detail', 'kind']);
 const KNOWN_SCHEMA_KEYS = new Set([
     'SCHEMA', 'OWNER', 'label', 'detail', 'kind', 'insertText', 'sortText', 'filterText',
 ]);

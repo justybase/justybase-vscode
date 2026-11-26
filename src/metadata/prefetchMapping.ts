@@ -75,6 +75,8 @@ export interface RawSchemaRow {
 
 export interface RawDatabaseRow {
     DATABASE: string;
+    /** Netezza default schema for DB.. resolution. */
+    DEFSCHEMA?: string | null;
     [key: string]: unknown;
 }
 

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { runQueryRaw } from '../core/queryRunner';
+import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { DatabaseMetadata, MetadataCache } from '../metadataCache';
-import { NZ_SYSTEM_VIEWS } from '../metadata';
+import { NZ_QUERIES } from '../metadata';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import type { ConnectionManager } from '../core/connectionManager';
 
@@ -84,7 +84,7 @@ export async function getDatabaseList(
 
     const result = await runQueryRaw(
         context,
-        `SELECT DATABASE FROM ${NZ_SYSTEM_VIEWS.DATABASE} ORDER BY DATABASE`,
+        NZ_QUERIES.LIST_DATABASES,
         true,
         connectionManager,
         connectionName,
@@ -99,16 +99,21 @@ export async function getDatabaseList(
         return [];
     }
 
-    const databases = result.data.map(row => String(row[0]));
+    const rows = queryResultToRows<{ DATABASE: string; DEFSCHEMA?: string | null }>(result);
+    const databases = rows.map(row => String(row.DATABASE));
     if (metadataCache) {
         metadataCache.setDatabases(
             connectionName,
-            databases.map(db => ({
-                DATABASE: db,
-                label: db,
-                kind: 9,
-                detail: 'Database',
-            })) as DatabaseMetadata[],
+            rows.map(row => {
+                const defaultSchema = typeof row.DEFSCHEMA === 'string' ? row.DEFSCHEMA.trim() : '';
+                return {
+                    DATABASE: row.DATABASE,
+                    label: row.DATABASE,
+                    kind: 9,
+                    detail: 'Database',
+                    ...(defaultSchema ? { DEFSCHEMA: defaultSchema } : {}),
+                };
+            }) as DatabaseMetadata[],
         );
     }
     return databases;

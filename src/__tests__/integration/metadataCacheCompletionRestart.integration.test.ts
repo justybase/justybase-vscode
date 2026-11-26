@@ -29,6 +29,11 @@ import { MetadataCache } from '../../metadataCache';
 import { DocumentParseSession } from '../../sqlParser/documentParseSession';
 import { Logger } from '../../utils/logger';
 import {
+    resetNetezzaDefaultSchemaLookupsForTests,
+    resolveNetezzaDefaultSchema,
+    NETEZZA_DEFAULT_SCHEMA_TIMEOUT_SECONDS,
+} from '../../dialects/netezza/metadata/netezzaSchemaContext';
+import {
     countColumnLayersInRam,
     createMetadataCache,
     createTempStorageDir,
@@ -62,10 +67,15 @@ jest.mock('../../core/queryRunner', () => ({
     }),
 }));
 
-jest.mock('../../dialects/netezza/metadata/netezzaSchemaContext', () => ({
-    resolveNetezzaSchemasEnabled: jest.fn(async () => true),
-    resolveNetezzaDefaultSchema: jest.fn(async () => 'ADMIN'),
-}));
+jest.mock('../../dialects/netezza/metadata/netezzaSchemaContext', () => {
+    const actual = jest.requireActual('../../dialects/netezza/metadata/netezzaSchemaContext');
+    return {
+        ...actual,
+        // Schema mode is unrelated to default-schema persistence; keep the
+        // probe out of these cache tests.
+        resolveNetezzaSchemasEnabled: jest.fn(async () => true),
+    };
+});
 
 const COMPLETION_DOCUMENT = 'file:///restart-completion.sql';
 
@@ -76,6 +86,7 @@ describe('metadata cache restart → completion integration', () => {
     beforeEach(() => {
         tempDir = createTempStorageDir();
         runQueryRawMock.mockReset();
+        resetNetezzaDefaultSchemaLookupsForTests();
 
         const mockOutputChannel = {
             appendLine: () => undefined,
@@ -105,9 +116,21 @@ describe('metadata cache restart → completion integration', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    function populateRichCatalog(cache: MetadataCache): void {
+    function populateRichCatalog(
+        cache: MetadataCache,
+        options: { defaultSchema?: string | null } = {},
+    ): void {
+        const defaultSchema = options.defaultSchema === undefined
+            ? SCHEMA
+            : options.defaultSchema;
         cache.setDatabases(RESTART_CONN, [
-            { DATABASE: SMALL_DB, label: SMALL_DB, kind: 9, detail: 'Database' },
+            {
+                DATABASE: SMALL_DB,
+                ...(defaultSchema ? { DEFSCHEMA: defaultSchema } : {}),
+                label: SMALL_DB,
+                kind: 9,
+                detail: 'Database',
+            },
         ]);
         cache.setSchemas(RESTART_CONN, SMALL_DB, [
             { SCHEMA, label: SCHEMA, kind: 19, detail: 'Schema' },
@@ -141,6 +164,22 @@ describe('metadata cache restart → completion integration', () => {
                 [`${SMALL_DB}.${SCHEMA}.DIM_ACCOUNT`, 101],
                 [`${SMALL_DB}.${SCHEMA}.V_ACCOUNT_SUMMARY`, 102],
             ]),
+        );
+        cache.setTables(
+            RESTART_CONN,
+            `${SMALL_DB}.STAGE`,
+            [
+                {
+                    OBJNAME: 'STAGE_EVENTS',
+                    OBJID: 201,
+                    SCHEMA: 'STAGE',
+                    label: 'STAGE_EVENTS',
+                    objType: 'TABLE',
+                    kind: 6,
+                    DESCRIPTION: 'Staging events',
+                },
+            ],
+            new Map<string, number>([[`${SMALL_DB}.STAGE.STAGE_EVENTS`, 201]]),
         );
         cache.setProcedures(RESTART_CONN, `${SMALL_DB}..`, [
             {
@@ -218,7 +257,9 @@ describe('metadata cache restart → completion integration', () => {
         ]);
     }
 
-    function createCompletionConnectionManager(): ConnectionManager {
+    function createCompletionConnectionManager(
+        effectiveDatabase = SMALL_DB,
+    ): ConnectionManager {
         return {
             ensureFullyLoaded: async () => undefined,
             getConnectionForExecution: () => RESTART_CONN,
@@ -226,7 +267,7 @@ describe('metadata cache restart → completion integration', () => {
                 name: RESTART_CONN,
                 host: 'nz.host',
                 port: 5480,
-                database: SMALL_DB,
+                database: effectiveDatabase,
                 user: 'admin',
                 password: '',
                 dbType: 'netezza' as const,
@@ -234,22 +275,26 @@ describe('metadata cache restart → completion integration', () => {
             getConnectionMetadata: () => ({
                 host: 'nz.host',
                 port: 5480,
-                database: SMALL_DB,
+                database: effectiveDatabase,
                 user: 'admin',
                 dbType: 'netezza' as const,
             }),
             getConnectionDatabaseKind: () => 'netezza' as const,
             getConnectionNames: () => [RESTART_CONN],
-            getEffectiveDatabase: async () => SMALL_DB,
+            getEffectiveDatabase: async () => effectiveDatabase,
             getEffectiveSchema: async () => SCHEMA,
             getExecutionDatabaseKind: () => 'netezza' as const,
         } as unknown as ConnectionManager;
     }
 
-    function createCompletionHarness(cache: MetadataCache): {
+    function createCompletionHarness(
+        cache: MetadataCache,
+        effectiveDatabase = SMALL_DB,
+    ): {
         complete: (sqlWithCursor: string) => Promise<CompletionItem[]>;
+        bridge: MetadataBridge;
     } {
-        const connectionManager = createCompletionConnectionManager();
+        const connectionManager = createCompletionConnectionManager(effectiveDatabase);
         // Cache-only paths must never reach the live provider. Failing loudly
         // here proves completion is served by the persisted snapshot.
         const metadataProvider = {
@@ -270,6 +315,7 @@ describe('metadata cache restart → completion integration', () => {
         ));
         const engine = new LspCompletionEngine(bridge, new DocumentParseSession());
         return {
+            bridge,
             complete: async (sqlWithCursor: string): Promise<CompletionItem[]> => {
                 const cursor = sqlWithCursor.indexOf('|');
                 if (cursor < 0) {
@@ -307,6 +353,8 @@ describe('metadata cache restart → completion integration', () => {
         const restarted = await restartFromDisk(writer, tempDir);
 
         expect(restarted.getDatabases(RESTART_CONN)?.map(db => db.DATABASE)).toEqual([SMALL_DB]);
+        expect(restarted.getDatabases(RESTART_CONN)?.[0]?.DEFSCHEMA).toBe(SCHEMA);
+        expect(restarted.getDefaultSchema(RESTART_CONN, SMALL_DB)).toBe(SCHEMA);
         expect(restarted.getSchemas(RESTART_CONN, SMALL_DB)?.map(schema => schema.SCHEMA))
             .toEqual([SCHEMA, 'STAGE']);
 
@@ -380,6 +428,127 @@ describe('metadata cache restart → completion integration', () => {
         expect(labels(await complete(`SELECT * FROM ${SMALL_DB}.${SCHEMA}.DIM_ACCOUNT D WHERE D.ACCOUNT_|`)))
             .toEqual(expect.arrayContaining(['ACCOUNT_ID', 'ACCOUNT_NAME']));
         expect(runQueryRawMock).not.toHaveBeenCalled();
+    });
+
+    it('uses the persisted DEFSCHEMA for DB.. completion instead of assuming ADMIN', async () => {
+        const writer = createMetadataCache(tempDir);
+        populateRichCatalog(writer, { defaultSchema: 'STAGE' });
+        const restarted = await restartFromDisk(writer, tempDir);
+        const { complete, bridge } = createCompletionHarness(restarted);
+
+        // The exact host request used by DB.. resolution returns the persisted
+        // DEFSCHEMA, without a catalog round-trip.
+        await expect(bridge.getNetezzaDefaultSchema(COMPLETION_DOCUMENT, SMALL_DB))
+            .resolves.toBe('STAGE');
+
+        // STAGE is a real DEFSCHEMA, not the historical ADMIN fallback. Only
+        // objects from that schema may be proposed for DB..TABLE.
+        const items = await complete(`SELECT * FROM ${SMALL_DB}..|`);
+        expect(labels(items)).toContain('STAGE_EVENTS');
+        expect(labels(items)).not.toContain('DIM_ACCOUNT');
+        expect(labels(items)).not.toContain('V_ACCOUNT_SUMMARY');
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+    });
+
+    it('resolves DB.. against the database named in the SQL, not the active connection database', async () => {
+        const writer = createMetadataCache(tempDir);
+        populateRichCatalog(writer);
+        writer.setDatabases(RESTART_CONN, [
+            {
+                DATABASE: SMALL_DB,
+                DEFSCHEMA: SCHEMA,
+                label: SMALL_DB,
+                kind: 9,
+                detail: 'Database',
+            },
+            {
+                DATABASE: 'OTHERDB',
+                DEFSCHEMA: 'PUBLIC',
+                label: 'OTHERDB',
+                kind: 9,
+                detail: 'Database',
+            },
+        ]);
+        const restarted = await restartFromDisk(writer, tempDir);
+        const { complete, bridge } = createCompletionHarness(restarted, 'OTHERDB');
+
+        // The document is connected to OTHERDB; SMALLDB.. must still use
+        // SMALLDB's DEFSCHEMA (ADMIN), not OTHERDB's (PUBLIC).
+        await expect(bridge.getNetezzaDefaultSchema(COMPLETION_DOCUMENT, SMALL_DB))
+            .resolves.toBe(SCHEMA);
+        await expect(bridge.getNetezzaDefaultSchema(COMPLETION_DOCUMENT, 'OTHERDB'))
+            .resolves.toBe('PUBLIC');
+
+        const items = await complete(`SELECT * FROM ${SMALL_DB}..|`);
+        expect(labels(items)).toContain('DIM_ACCOUNT');
+        expect(labels(items)).not.toContain('STAGE_EVENTS');
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+    });
+
+    it('serves DB.. from cache when DEFSCHEMA is unknown and never caches a failure', async () => {
+        const writer = createMetadataCache(tempDir);
+        populateRichCatalog(writer, { defaultSchema: null });
+        const restarted = await restartFromDisk(writer, tempDir);
+        const { complete } = createCompletionHarness(restarted);
+        runQueryRawMock.mockRejectedValue(new Error('connection busy'));
+
+        // Simulates an old snapshot (or a transient lookup failure): DB.. must
+        // propose every cached object immediately instead of waiting for the
+        // DEFSCHEMA catalog query.
+        const before = await complete(`SELECT * FROM ${SMALL_DB}..|`);
+        expect(labels(before)).toEqual(expect.arrayContaining([
+            'DIM_ACCOUNT',
+            'V_ACCOUNT_SUMMARY',
+            'STAGE_EVENTS',
+        ]));
+        expect(restarted.getDefaultSchema(RESTART_CONN, SMALL_DB)).toBeUndefined();
+
+        // The recovery lookup is bounded and identified as metadata, not a
+        // user query that may inherit a one-hour timeout.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(runQueryRawMock).toHaveBeenCalledWith(expect.objectContaining({
+            timeoutSeconds: NETEZZA_DEFAULT_SCHEMA_TIMEOUT_SECONDS,
+            maxRows: 1,
+            isUserQuery: false,
+        }));
+        // A failed lookup must not poison the cache with ADMIN.
+        expect(restarted.getDefaultSchema(RESTART_CONN, SMALL_DB)).toBeUndefined();
+
+        const after = await complete(`SELECT * FROM ${SMALL_DB}..|`);
+        expect(labels(after)).toEqual(expect.arrayContaining([
+            'DIM_ACCOUNT',
+            'V_ACCOUNT_SUMMARY',
+            'STAGE_EVENTS',
+        ]));
+        expect(runQueryRawMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('remembers DEFSCHEMA from the bounded background lookup for the next DB.. request', async () => {
+        const writer = createMetadataCache(tempDir);
+        populateRichCatalog(writer, { defaultSchema: null });
+        const restarted = await restartFromDisk(writer, tempDir);
+        runQueryRawMock.mockResolvedValue({
+            columns: [{ name: 'DEFSCHEMA' }],
+            data: [['STAGE']],
+        } as never);
+
+        // The completion path schedules this lookup without awaiting it.
+        await expect(resolveNetezzaDefaultSchema(
+            RESTART_CONN,
+            SMALL_DB,
+            createCompletionConnectionManager(),
+            restarted,
+            { subscriptions: [] } as unknown as vscode.ExtensionContext,
+        )).resolves.toBeUndefined();
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(restarted.getDefaultSchema(RESTART_CONN, SMALL_DB)).toBe('STAGE');
+
+        const { complete } = createCompletionHarness(restarted);
+        const after = await complete(`SELECT * FROM ${SMALL_DB}..|`);
+        expect(labels(after)).toContain('STAGE_EVENTS');
+        expect(labels(after)).not.toContain('DIM_ACCOUNT');
+        expect(runQueryRawMock).toHaveBeenCalledTimes(1);
     });
 
     it('serves column completions with catalog comments from the persisted layer', async () => {

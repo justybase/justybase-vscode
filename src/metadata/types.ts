@@ -59,6 +59,8 @@ export interface CachedObjectInfo {
 
 export interface DatabaseMetadata {
     DATABASE: string;
+    /** Netezza default schema (DEFSCHEMA) captured with the database list. */
+    DEFSCHEMA?: string;
     label?: string;
     detail?: string;
     kind?: number;

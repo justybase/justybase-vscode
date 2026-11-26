@@ -79,7 +79,25 @@ export function getTablesForScope(
     ? buildNetezzaDbSchemaCacheKey(dbName, schemaName)
     : buildSchemaCacheKey(dbName, schemaName);
   if (schemaName) {
-    return cache.getTables(connectionName, cacheKey);
+    const direct = cache.getTables(connectionName, cacheKey);
+    if (direct !== undefined) {
+      return direct;
+    }
+    // Older snapshots and database-level type-group refreshes may only have
+    // the DB.. aggregate. Recover the requested schema from it instead of
+    // reporting a cache miss (DB.. completion resolves to DEFSCHEMA).
+    const aggregate = cache.getTablesAllSchemas(connectionName, dbName);
+    if (aggregate && aggregate.length > 0) {
+      const requestedSchema = schemaName.toUpperCase();
+      const matching = aggregate.filter((item) =>
+        typeof item.SCHEMA === 'string'
+        && item.SCHEMA.trim().toUpperCase() === requestedSchema,
+      );
+      if (matching.length > 0) {
+        return matching;
+      }
+    }
+    return direct;
   }
 
   const direct = cache.getTables(connectionName, cacheKey);

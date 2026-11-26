@@ -67,6 +67,8 @@ export class CompletionPathResolver {
         databaseKind,
         false,
         effectiveSchema,
+        false,
+        requestContext.netezzaSchemasEnabled,
       );
     }
     if (alterTableContext?.kind === "action") {
@@ -96,6 +98,7 @@ export class CompletionPathResolver {
         true,
         effectiveSchema,
         true,
+        requestContext.netezzaSchemasEnabled,
       );
       return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }
@@ -178,6 +181,7 @@ export class CompletionPathResolver {
       effectiveDb,
       effectiveSchema,
       databaseKind,
+      requestContext.netezzaSchemasEnabled,
     );
   }
 
@@ -237,6 +241,7 @@ export class CompletionPathResolver {
         true,
         requestContext.effectiveSchema,
         true,
+        requestContext.netezzaSchemasEnabled,
       );
       return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }
@@ -257,6 +262,7 @@ export class CompletionPathResolver {
       effectiveDb,
       requestContext.effectiveSchema,
       databaseKind,
+      requestContext.netezzaSchemasEnabled,
     );
   }
 
@@ -312,6 +318,7 @@ export class CompletionPathResolver {
     effectiveDb: string | undefined,
     effectiveSchema: string | undefined,
     databaseKind?: DatabaseKind,
+    netezzaSchemasEnabled?: boolean,
   ): Promise<CompletionItem[]> {
     if (targetContext.targetType === "procedure") {
       return this.metadataResolver.resolveProcedurePathCompletions(
@@ -320,6 +327,7 @@ export class CompletionPathResolver {
         effectiveDb,
         databaseKind,
         effectiveSchema,
+        netezzaSchemasEnabled,
       );
     }
 
@@ -330,6 +338,7 @@ export class CompletionPathResolver {
         effectiveDb,
         databaseKind,
         effectiveSchema,
+        netezzaSchemasEnabled,
       );
     }
 
@@ -341,6 +350,8 @@ export class CompletionPathResolver {
       databaseKind,
       false,
       effectiveSchema,
+      false,
+      netezzaSchemasEnabled,
     );
   }
 }

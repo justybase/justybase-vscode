@@ -79,6 +79,28 @@ describe('schemaTreeDataSource', () => {
     ]);
   });
 
+  it('getTablesForScope recovers a schema-specific miss from the DB.. aggregate', () => {
+    const cache = {
+      getTables: jest.fn((_conn: string, key: string) =>
+        key.endsWith('..')
+          ? [
+            { OBJNAME: 'T1', SCHEMA: 'ADMIN' },
+            { OBJNAME: 'T2', SCHEMA: 'PUBLIC' },
+          ]
+          : undefined,
+      ),
+      getTablesAllSchemas: jest.fn((_connectionName: string, _dbName: string) => [
+        { OBJNAME: 'T1', SCHEMA: 'ADMIN' },
+        { OBJNAME: 'T2', SCHEMA: 'PUBLIC' },
+      ]),
+    };
+
+    expect(getTablesForScope(cache as never, 'conn', 'DB1', 'ADMIN')).toEqual([
+      { OBJNAME: 'T1', SCHEMA: 'ADMIN' },
+    ]);
+    expect(cache.getTablesAllSchemas).toHaveBeenCalledWith('conn', 'DB1');
+  });
+
   it('getTablesForScope treats a loaded empty catalog as an authoritative empty result', () => {
     const cache = {
       getTables: jest.fn(() => undefined),

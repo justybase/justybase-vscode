@@ -833,11 +833,16 @@ function buildAuxiliaryColumnObjectScope(
  */
 export const NZ_QUERIES = {
     /**
-     * Get all databases
-     * Returns: DATABASE column
+     * Get all databases with their default schema.
+     * Returns: DATABASE, DEFSCHEMA
+     *
+     * DEFSCHEMA is part of the cached database layer so `DB..TABLE`
+     * completion never has to issue a live catalog query to resolve the
+     * default schema (that query used the normal query timeout and could
+     * block suggestions for many minutes on a busy connection).
      */
     LIST_DATABASES: `
-        SELECT DATABASE 
+        SELECT DATABASE, DEFSCHEMA
         FROM ${NZ_SYSTEM_VIEWS.DATABASE}
         ORDER BY DATABASE
     `.trim(),

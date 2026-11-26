@@ -3,6 +3,12 @@ import type { DatabaseConnection } from "../../../contracts/database";
 const SHOW_SCHEMAS_ENABLED_SQL = "SHOW ENABLE_SCHEMA_DBO_CHECK";
 
 /**
+ * The probe runs from the authoring context path, so it must not inherit the
+ * generic query timeout (which can be an hour on a busy connection).
+ */
+const SCHEMAS_ENABLED_PROBE_TIMEOUT_SECONDS = 15;
+
+/**
  * Parses Netezza NOTICE text from `SHOW ENABLE_SCHEMA_DBO_CHECK`.
  * Last character `0` means schemas disabled (owner mode); otherwise enabled.
  */
@@ -34,6 +40,7 @@ export async function detectNetezzaSchemasEnabled(
 
   try {
     const command = connection.createCommand(SHOW_SCHEMAS_ENABLED_SQL);
+    command.commandTimeout = SCHEMAS_ENABLED_PROBE_TIMEOUT_SECONDS;
     const reader = await command.executeReader();
     try {
       while (await reader.read()) {

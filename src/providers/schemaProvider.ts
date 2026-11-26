@@ -2603,15 +2603,21 @@ export class SchemaProvider
                 if (!result) {
                     return [];
                 }
-                const databases = queryResultToRows<{ DATABASE: string }>(result);
+                const databases = queryResultToRows<{ DATABASE: string; DEFSCHEMA?: string | null }>(result);
 
                 // Update Cache
-                const cacheItems: DatabaseMetadata[] = databases.map((row: { DATABASE: string }) => ({
-                    DATABASE: row.DATABASE,
-                    label: row.DATABASE,
-                    kind: 9, // Module
-                    detail: 'Database',
-                }));
+                const cacheItems: DatabaseMetadata[] = databases.map(
+                    (row: { DATABASE: string; DEFSCHEMA?: string | null }) => {
+                        const defaultSchema = typeof row.DEFSCHEMA === 'string' ? row.DEFSCHEMA.trim() : '';
+                        return {
+                            DATABASE: row.DATABASE,
+                            label: row.DATABASE,
+                            kind: 9, // Module
+                            detail: 'Database',
+                            ...(defaultSchema ? { DEFSCHEMA: defaultSchema } : {}),
+                        };
+                    },
+                );
                 this.metadataCache.setDatabases(element.connectionName, cacheItems);
 
                 return databases.map(
