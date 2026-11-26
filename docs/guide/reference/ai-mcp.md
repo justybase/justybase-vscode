@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Supported
 last_verified: 2026-11-20
-product_version: 3.22.4
+product_version: 3.23.0
 ---
 
 # Copilot and MCP tools

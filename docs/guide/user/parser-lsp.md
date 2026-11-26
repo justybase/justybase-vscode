@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.22.4
+product_version: 3.23.0
 ---
 
 # Parser, LSP and SQL Editor
