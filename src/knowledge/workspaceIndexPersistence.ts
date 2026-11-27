@@ -9,7 +9,35 @@ import {
 
 const INDEX_FILE = "workspace-index.json";
 
-async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
+/**
+ * Windows can transiently reject `rename` while another process (antivirus,
+ * indexer) holds the destination. Retrying briefly avoids dropping a checkpoint
+ * for a problem that resolves on its own.
+ */
+const TRANSIENT_RENAME_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const RENAME_RETRY_DELAYS_MS = [25, 50, 100] as const;
+
+function isTransientRenameError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && TRANSIENT_RENAME_CODES.has(String((error as { code?: unknown }).code ?? ""));
+}
+
+async function renameWithRetry(source: string, destination: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.rename(source, destination);
+      return;
+    } catch (error: unknown) {
+      if (attempt >= RENAME_RETRY_DELAYS_MS.length || !isTransientRenameError(error)) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, RENAME_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
+async function writeJsonAtomicNow(filePath: string, value: unknown): Promise<void> {
   const directory = path.dirname(filePath);
   await fs.mkdir(directory, { recursive: true });
   // Checkpoints from file-watcher events can land in the same millisecond, so
@@ -17,7 +45,34 @@ async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> 
   // and silently drops the delta that would publish the file's evidence.
   const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
   await fs.writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await fs.rename(temporaryPath, filePath);
+  try {
+    await renameWithRetry(temporaryPath, filePath);
+  } catch (error: unknown) {
+    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Serialize checkpoints for one file. Two concurrent saves used to race two
+ * renames onto the same destination; on Windows the loser can fail with EPERM
+ * even when both temporary names are unique.
+ */
+const writeQueues = new Map<string, Promise<void>>();
+
+function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
+  const previous = writeQueues.get(filePath) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => writeJsonAtomicNow(filePath, value));
+  writeQueues.set(filePath, next);
+  const clearQueue = (): void => {
+    if (writeQueues.get(filePath) === next) {
+      writeQueues.delete(filePath);
+    }
+  };
+  void next.then(clearQueue, clearQueue);
+  return next;
 }
 
 /**
