@@ -15,14 +15,19 @@ import type {
   ExecutionTerminalStatus,
 } from '@justybase/contracts';
 
-import { extractDatabaseErrorDetails, isConnectionExceptionSqlState, isDatabaseSqlError } from './errorDetails';
+import {
+  extractDatabaseErrorDetails,
+  isConnectionExceptionSqlState,
+  isDatabaseSqlError,
+  isEmptyBackendErrorResponse,
+} from './errorDetails';
 
 /**
  * Backend diagnostics extracted from a failure chain, re-exported so product
  * adapters can populate transport DTOs without their own unwrapping logic.
  */
 export { extractDatabaseErrorDetails, isDatabaseSqlError } from './errorDetails';
-export { hasSqlStateCode, isConnectionExceptionSqlState } from './errorDetails';
+export { hasSqlStateCode, isConnectionExceptionSqlState, isEmptyBackendErrorResponse } from './errorDetails';
 
 export interface ExecutionBackend<TTarget> {
   execute(
@@ -285,6 +290,10 @@ function defaultIsCancellationError(error: unknown): boolean {
  * reconnect behaviour.
  */
 export function isConnectionBrokenError(error: unknown): boolean {
+  // A Netezza ErrorResponse with no fields is the driver's only symptom of a
+  // stale socket after inactivity. It carries no SQLSTATE, so the generic
+  // database-error guard below would otherwise suppress reconnect/replay.
+  if (isEmptyBackendErrorResponse(error)) return true;
   // SQLSTATE class 08 means the link itself is unusable, so it keeps the
   // existing reconnect/replay behaviour.
   if (isConnectionExceptionSqlState(error)) return true;

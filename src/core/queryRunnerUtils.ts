@@ -7,7 +7,11 @@
 import * as vscode from "vscode";
 import { compactSqlErrorMessage } from '@justybase/ui-core';
 import { ConnectionManager } from "./connectionManager";
-import { isConnectionExceptionSqlState, isDatabaseSqlError } from '@justybase/database-runtime';
+import {
+  isConnectionExceptionSqlState,
+  isDatabaseSqlError,
+  isEmptyBackendErrorResponse,
+} from '@justybase/database-runtime';
 export { normalizeUriKey } from "./uriUtils";
 
 /**
@@ -110,6 +114,10 @@ function collectConnectionErrorMessages(error: unknown, maxDepth = 5): string {
  * SQLSTATE class `08` (connection exception), which keeps reconnect behaviour.
  */
 export function isConnectionBrokenError(error: unknown): boolean {
+  // A stale tab connection after long inactivity can make the Netezza backend
+  // answer with an empty ErrorResponse. The driver reports it as a database
+  // error, but it carries no SQLSTATE, so reconnect/replay must still happen.
+  if (isEmptyBackendErrorResponse(error)) return true;
   if (isConnectionExceptionSqlState(error)) return true;
   if (isDatabaseSqlError(error)) return false;
   const msg = collectConnectionErrorMessages(error).toLowerCase();

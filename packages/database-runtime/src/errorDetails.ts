@@ -225,6 +225,36 @@ export function hasSqlStateCode(error: unknown): boolean {
   return isSqlStateCode(extractDatabaseErrorDetails(error)?.code);
 }
 
+/**
+ * Fallback sentence emitted by the Netezza driver when the backend answered an
+ * ErrorResponse without any usable field (no severity, code, message, detail or
+ * hint). A stale persistent connection after a long idle period can answer with
+ * exactly such an empty response, so this is a transport symptom rather than a
+ * SQL failure even though the driver reports it as an `NzDatabaseError`.
+ */
+const EMPTY_BACKEND_ERROR_RESPONSE = 'netezza backend returned an empty error response';
+
+/**
+ * True when the driver produced its "empty error response" fallback message.
+ *
+ * The driver sets both `message` and `dbMessage` to that sentence and sends no
+ * SQLSTATE/severity, so `isDatabaseSqlError()` alone would suppress reconnect
+ * and replay. Detecting it explicitly lets a stale tab connection be dropped
+ * and, for allow-listed read-only SQL, the statement replayed once.
+ */
+export function isEmptyBackendErrorResponse(error: unknown): boolean {
+  return selectFromErrorChain(error, record => {
+    const message = typeof record.message === 'string'
+      ? record.message.trim().toLowerCase()
+      : undefined;
+    if (message !== EMPTY_BACKEND_ERROR_RESPONSE) return undefined;
+    // A real structured backend error keeps its own reconnect semantics;
+    // SQLSTATE class 08 is already handled by isConnectionExceptionSqlState().
+    if (isSqlStateCode(record.code) || readText(record.severity) !== undefined) return undefined;
+    return true;
+  }) === true;
+}
+
 /** SQLSTATE class `08` is "connection exception" (e.g. `08001`, `08S01`). */
 const CONNECTION_EXCEPTION_CLASS = '08';
 

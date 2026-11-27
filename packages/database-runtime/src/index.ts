@@ -13,6 +13,7 @@ export {
   hasSqlStateCode,
   isConnectionExceptionSqlState,
   isDatabaseSqlError,
+  isEmptyBackendErrorResponse,
   MAX_ERROR_DETAIL_LENGTH,
 } from './errorDetails';
 

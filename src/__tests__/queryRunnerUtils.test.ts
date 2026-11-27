@@ -145,6 +145,31 @@ describe("queryRunnerUtils", () => {
       expect(isConnectionBrokenError(new Error("Connection RESET"))).toBe(true);
       expect(isConnectionBrokenError(new Error("ECONNRESET"))).toBe(true);
     });
+
+    it("should detect the Netezza empty backend error response of a stale connection", () => {
+      const message = "Netezza backend returned an empty error response";
+      const driverError = Object.assign(new Error(message), {
+        name: "NzDatabaseError",
+        dbMessage: message,
+        diagnostics: {},
+        raw: "",
+      });
+      expect(isConnectionBrokenError(driverError)).toBe(true);
+      expect(
+        isConnectionBrokenError(new Error("Query failed", { cause: driverError })),
+      ).toBe(true);
+    });
+
+    it("should not treat a structured SQL error with the fallback text as broken", () => {
+      const error = Object.assign(new Error("Netezza backend returned an empty error response"), {
+        name: "NzDatabaseError",
+        dbMessage: "Netezza backend returned an empty error response",
+        code: "42P01",
+        severity: "ERROR",
+        diagnostics: { C: "42P01" },
+      });
+      expect(isConnectionBrokenError(error)).toBe(false);
+    });
   });
 
   describe("formatQueryRunnerErrorMessage", () => {

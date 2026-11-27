@@ -11,6 +11,7 @@ import {
   isConnectionBrokenError,
   isConnectionExceptionSqlState,
   isDatabaseSqlError,
+  isEmptyBackendErrorResponse,
   MAX_ERROR_DETAIL_LENGTH,
   type ExecutionBackend,
 } from '../src';
@@ -26,6 +27,20 @@ function backendError(overrides: Record<string, unknown> = {}): Error {
   error.hint = 'Check the table name and schema search path.';
   error.diagnostics = { S: 'ERROR', C: '42P01', M: 'relation does not exist' };
   error.raw = 'SERROR\0C42P01\0Mrelation does not exist\0\0';
+  return Object.assign(error, overrides);
+}
+
+/**
+ * Mirrors the Netezza driver's fallback error for an ErrorResponse with no
+ * usable fields (a common symptom of a stale socket after long inactivity).
+ */
+function emptyBackendResponseError(overrides: Record<string, unknown> = {}): Error {
+  const message = 'Netezza backend returned an empty error response';
+  const error = new Error(message) as Error & Record<string, unknown>;
+  error.name = 'NzDatabaseError';
+  error.dbMessage = message;
+  error.diagnostics = {};
+  error.raw = '';
   return Object.assign(error, overrides);
 }
 
@@ -292,6 +307,31 @@ describe('orchestrator failure propagation', () => {
     await collect(backend, request({ retryPolicy: 'safe-read-only-on-broken-connection' }));
     expect(attempts).toBe(1);
   });
+
+  it('reconnects and replays safe read-only SQL after an empty backend error response', async () => {
+    let attempts = 0;
+    let reconnects = 0;
+    const backend: ExecutionBackend<string> = {
+      execute: async (_target, _sql, _options, callbacks): Promise<DatabaseQueryResult> => {
+        attempts += 1;
+        callbacks.onColumns([]);
+        if (attempts === 1) throw new ExecutionBackendError('Query failed.', emptyBackendResponseError());
+        return { totalRows: 0, limitReached: false };
+      },
+      reconnect: async () => { reconnects += 1; },
+      isSafeToRetrySql: () => true,
+    };
+    const events = await collect(backend, request({
+      connectionMode: 'persistent',
+      retryPolicy: 'safe-read-only-on-broken-connection',
+    }));
+    expect(attempts).toBe(2);
+    expect(reconnects).toBe(1);
+    expect(events.some(event => event.type === 'retrying')).toBe(true);
+    expect(events.find(event => event.type === 'execution-terminal')).toMatchObject({
+      summary: { status: 'success' },
+    });
+  });
 });
 
 describe('transport vs database classification', () => {
@@ -319,5 +359,29 @@ describe('transport vs database classification', () => {
     expect(isConnectionBrokenError(new Error('socket closed'))).toBe(true);
     expect(isConnectionBrokenError(Object.assign(new Error('reset'), { code: 'ECONNRESET' }))).toBe(true);
     expect(isConnectionBrokenError(new Error('syntax error'))).toBe(false);
+  });
+
+  it('treats the Netezza empty backend error response as a broken connection', () => {
+    const error = emptyBackendResponseError();
+    expect(isEmptyBackendErrorResponse(error)).toBe(true);
+    expect(isDatabaseSqlError(error)).toBe(true);
+    expect(isConnectionBrokenError(error)).toBe(true);
+  });
+
+  it('finds the empty backend error response behind a wrapper cause', () => {
+    const error = new Error('Query failed.', { cause: emptyBackendResponseError() });
+    expect(isEmptyBackendErrorResponse(error)).toBe(true);
+    expect(isConnectionBrokenError(error)).toBe(true);
+  });
+
+  it('keeps a structured database error out of the broken-connection path', () => {
+    // Even if a real SQL error happens to carry the fallback sentence, its
+    // SQLSTATE and severity prove the link is alive and must win.
+    const error = backendError({
+      message: 'Netezza backend returned an empty error response',
+      dbMessage: 'Netezza backend returned an empty error response',
+    });
+    expect(isEmptyBackendErrorResponse(error)).toBe(false);
+    expect(isConnectionBrokenError(error)).toBe(false);
   });
 });
