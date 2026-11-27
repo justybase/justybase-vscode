@@ -3522,6 +3522,165 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
   color: var(--justybase-grid-muted);
 }
 
+/* Analytical options: the same engine, rescored without recomputing groups. */
+.ui-analytical-header,
+.ui-analytical-controls {
+  flex-wrap: wrap;
+}
+
+.ui-analytical-options {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  background: var(--justybase-grid-surface);
+}
+
+.ui-analytical-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 10px;
+  align-items: end;
+}
+
+.ui-analytical-options-grid label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--justybase-grid-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ui-analytical-options-grid label.ui-analytical-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ui-analytical-options-grid select,
+.ui-analytical-options-grid input[type="number"] {
+  min-height: 24px;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-bg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ui-analytical-options > button,
+.ui-analytical-options-grid > button {
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ui-analytical-rule-picker,
+.ui-analytical-column-picker {
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.ui-analytical-rule-picker > summary,
+.ui-analytical-column-picker > summary {
+  color: var(--justybase-grid-muted);
+  cursor: pointer;
+}
+
+.ui-analytical-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 3px 12px;
+  margin-top: 6px;
+}
+
+.ui-analytical-rule-grid label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  text-transform: none;
+}
+
+.ui-analytical-notices {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 8%, transparent);
+  font-size: 11px;
+}
+
+.ui-analytical-notices p {
+  margin: 2px 0;
+}
+
+.ui-analytical-groups tbody tr:focus-visible {
+  outline: 1px solid var(--justybase-grid-accent);
+  outline-offset: -1px;
+}
+
+.ui-analytical-flag > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.ui-analytical-flag-rule {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-weight: 600;
+}
+
+.ui-analytical-evidence {
+  width: calc(100% - 18px);
+  margin: 4px 0 6px 18px;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.ui-analytical-evidence th {
+  width: 38%;
+  padding: 1px 6px 1px 0;
+  color: var(--justybase-grid-muted);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ui-analytical-evidence td {
+  padding: 1px 0;
+}
+
+.ui-analytical-evidence-notes {
+  margin: 0 0 6px 18px;
+  padding-left: 14px;
+  color: var(--justybase-grid-muted);
+  font-size: 10px;
+}
+
+.ui-analytical-detail tr.ui-analytical-column-flagged td:first-child {
+  box-shadow: inset 2px 0 0 var(--vscode-editorWarning-foreground, #cca700);
+}
+
 /* Pivot builder: one compact card so a pivot is configured explicitly instead
    of silently choosing dimensions from the data shape. */
 .ui-pivot-backdrop {
