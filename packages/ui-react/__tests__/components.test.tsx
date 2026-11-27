@@ -831,6 +831,27 @@ describe('shared React presentation', () => {
     expect(scroller.scrollLeft).toBe(previous);
   });
 
+  it('uses the painted header geometry when the computed column layout is stale', () => {
+    const ref = createRef<DataGridHandle>();
+    const columns = ['COL_A', 'COL_B', 'COL_C', 'COL_D', 'COL_E', 'COL_F'].map(name => ({ name, type: 'VARCHAR' }));
+    const { container } = render(<DataGrid
+      ref={ref}
+      resultSetId="stale-layout-scroll"
+      columns={columns}
+      rows={[columns.map((_column, index) => `value-${index}`)]}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    const header = screen.getByRole('columnheader', { name: /COL_F/ });
+    if (!scroller || !ref.current) return;
+    // Layout coordinates say the column fits, while the painted header is
+    // partially beyond the viewport. The jump must trust the painted cell.
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ left: 0, right: 1200, width: 1200, top: 0, bottom: 100, height: 100, x: 0, y: 0, toJSON: () => ({}) }) });
+    Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 1200 });
+    Object.defineProperty(header, 'getBoundingClientRect', { configurable: true, value: () => ({ left: 1150, right: 1250, width: 100, top: 0, bottom: 100, height: 100, x: 1150, y: 0, toJSON: () => ({}) }) });
+    act(() => ref.current?.scrollToColumn(5));
+    expect(scroller.scrollLeft).toBe(50);
+  });
+
   it('ignores column scroll requests without a mounted layout', () => {
     const ref = createRef<DataGridHandle>();
     const { unmount } = render(<DataGrid ref={ref} resultSetId="empty-column-handle" columns={[]} rows={[]} />);

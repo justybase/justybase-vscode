@@ -1331,6 +1331,7 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
   const scrollRestorationRef = useRef<ScrollRestorationState | undefined>(undefined);
   const nativeScrollRef = useRef<ScrollRestorationState | undefined>(undefined);
   const pendingScrollRestorationRef = useRef<PendingScrollRestoration | undefined>(undefined);
+  const pendingColumnScrollRef = useRef<number | undefined>(undefined);
   const [columnViewport, setColumnViewport] = useState(columnViewportRef.current);
   activeViewRef.current = activeView;
   selectionChangeRef.current = onSelectionChange;
@@ -1574,6 +1575,25 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
       columnViewportSyncRef.current = undefined;
     };
   }, [columns.length, resultSetId, rows.length]);
+
+  // `scrollbar-gutter: stable` reserves space that the browser excludes from
+  // the reachable horizontal extent. Mirror that width with a trailing spacer
+  // so the last column can be scrolled fully into view instead of hiding
+  // behind the reserved gutter by exactly one scrollbar width.
+  const [scrollbarGutter, setScrollbarGutter] = useState(0);
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const measure = (): void => {
+      const gutter = Math.max(0, element.offsetWidth - element.clientWidth);
+      setScrollbarGutter(previous => previous === gutter ? previous : gutter);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const visibleColumnIndexes = useMemo(() => {
     const ordered = orderColumns(resolvedColumns, activeView);
@@ -2218,11 +2238,34 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
     const entry = layout.find(item => item.columnIndex === columnIndex);
     if (entry === undefined || entry.pinned) return false;
     const pinnedWidth = layout.reduce((sum, item) => item.pinned ? sum + item.width : sum, 0);
+    const scrollerRect = element.getBoundingClientRect();
+    const headerCell = columnHeaderRefs.current.get(`${entry.key}:${columnIndex}`);
+    // Header measurement is an estimate: CSS min-content can make the painted
+    // cell wider than the computed layout width. Trust the painted cell when it
+    // is mounted, otherwise a column that is only a few pixels past the right
+    // edge looks visible in layout coordinates and the jump silently no-ops.
+    const cellRect = scrollerRect.width > 0 && headerCell?.isConnected
+      ? headerCell.getBoundingClientRect()
+      : undefined;
+    const left = cellRect !== undefined && cellRect.width > 0
+      ? cellRect.left - scrollerRect.left + element.scrollLeft
+      : entry.offset;
+    const width = cellRect !== undefined && cellRect.width > 0 ? cellRect.width : entry.width;
     const visibleLeft = element.scrollLeft + ROW_NUMBER_WIDTH + pinnedWidth;
     const visibleRight = element.scrollLeft + element.clientWidth;
     let nextLeft = element.scrollLeft;
-    if (entry.offset < visibleLeft) nextLeft = Math.max(0, entry.offset - ROW_NUMBER_WIDTH - pinnedWidth);
-    else if (entry.offset + entry.width > visibleRight) nextLeft = entry.offset + entry.width - element.clientWidth;
+    if (left < visibleLeft) nextLeft = Math.max(0, left - ROW_NUMBER_WIDTH - pinnedWidth);
+    else if (left + width > visibleRight) nextLeft = left + width - element.clientWidth;
+    // The browser clamps scrollLeft to the painted content extent. When a
+    // stable scrollbar gutter is reserved, that extent is offsetWidth rather
+    // than clientWidth; asking for more makes the jump a no-op.
+    const gutterStable = typeof window !== 'undefined'
+      && typeof window.getComputedStyle === 'function'
+      && window.getComputedStyle(element).scrollbarGutter === 'stable';
+    const maxLeft = element.scrollWidth > element.clientWidth
+      ? Math.max(0, element.scrollWidth - (gutterStable ? element.offsetWidth : element.clientWidth))
+      : Number.POSITIVE_INFINITY;
+    nextLeft = Math.max(0, Math.min(nextLeft, maxLeft));
     if (nextLeft === element.scrollLeft) return false;
     element.scrollLeft = nextLeft;
     return true;
@@ -2264,29 +2307,60 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
     }, 1800);
   }
 
+  /** Records the browser-owned position before the host confirms it. */
+  function recordNativeScrollPosition(element: HTMLDivElement): void {
+    const position = {
+      scope: `${sourceId ?? ''}\u0000${resultSetId}`,
+      top: element.scrollTop,
+      left: element.scrollLeft,
+    };
+    scrollRestorationRef.current = position;
+    if (onScroll) nativeScrollRef.current = position;
+    pendingScrollRestorationRef.current = undefined;
+    columnViewportSyncRef.current?.();
+  }
+
   /** Public handle used by the toolbar's find-column control. */
   function scrollToColumn(columnIndex: number): void {
     const element = scroller.current;
     const layout = columnLayoutRef.current;
     if (!element || layout.length === 0) return;
-    if (!layout.some(item => item.columnIndex === columnIndex)) return;
+    const entry = layout.find(item => item.columnIndex === columnIndex);
+    if (entry === undefined) return;
+    // A windowed column has no painted header until the scroll below mounts
+    // it. Remember the target so the layout effect can repeat the jump with
+    // real geometry instead of the estimated layout width.
+    const headerCell = columnHeaderRefs.current.get(`${entry.key}:${columnIndex}`);
+    pendingColumnScrollRef.current = headerCell?.isConnected ? undefined : columnIndex;
     if (scrollColumnIntoView(element, layout, columnIndex)) {
-      // Adopt the native position before the host confirms it, so a pending
-      // restoration frame cannot write the previous controlled offset back.
-      const position = {
-        scope: `${sourceId ?? ''}\u0000${resultSetId}`,
-        top: element.scrollTop,
-        left: element.scrollLeft,
-      };
-      scrollRestorationRef.current = position;
-      if (onScroll) nativeScrollRef.current = position;
-      pendingScrollRestorationRef.current = undefined;
-      columnViewportSyncRef.current?.();
+      recordNativeScrollPosition(element);
     }
     highlightColumn(columnIndex);
   }
 
   useImperativeHandle(ref, () => ({ scrollToColumn }));
+
+  // A sidebar jump can target a column outside the mounted column window. The
+  // first pass uses the estimated layout width; once the scroll mounts the
+  // header, repeat the jump with the painted geometry so the column is fully
+  // visible instead of clipped by the estimate.
+  useLayoutEffect(() => {
+    const columnIndex = pendingColumnScrollRef.current;
+    if (columnIndex === undefined) return;
+    const element = scroller.current;
+    const layout = columnLayoutRef.current;
+    const entry = layout.find(item => item.columnIndex === columnIndex);
+    if (!element || entry === undefined) {
+      pendingColumnScrollRef.current = undefined;
+      return;
+    }
+    const headerCell = columnHeaderRefs.current.get(`${entry.key}:${columnIndex}`);
+    if (!headerCell?.isConnected) return;
+    pendingColumnScrollRef.current = undefined;
+    if (scrollColumnIntoView(element, layout, columnIndex)) {
+      recordNativeScrollPosition(element);
+    }
+  }, [mountedColumnSignature]);
 
   function sortColumn(columnIndex: number, extend = false): void {
     const column = resolvedColumns[columnIndex]!;
@@ -2806,7 +2880,9 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
             </th>;
           })}
           {rightColumnSpacer > 0 && <th aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: rightColumnSpacer, minWidth: rightColumnSpacer }} />}
-          <th aria-hidden="true" className="ui-data-grid-column-spacer ui-data-grid-fill-spacer" />
+          <th aria-hidden="true" className="ui-data-grid-column-spacer ui-data-grid-fill-spacer">
+            {scrollbarGutter > 0 && <div className="ui-data-grid-scrollbar-gutter-spacer" aria-hidden="true" style={{ left: '100%', width: scrollbarGutter }} />}
+          </th>
         </tr>
         {columnAggregationRows.top.map((cells, rowIndex) => renderAggregationRow(cells, 'top', rowIndex))}
         </thead>

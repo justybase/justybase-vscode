@@ -48,9 +48,11 @@ declare global {
 const profile = new URLSearchParams(window.location.search).get('profile') ?? 'comparison';
 const profileDefinition = profile === 'panel'
   ? { rowCount: 500, columnCount: 8 }
-  : profile === 'filter-4000x32'
-    ? { rowCount: 4_000, columnCount: 32 }
-    : { rowCount: 10_000, columnCount: 16 };
+  : profile === 'panel-wide'
+    ? { rowCount: 500, columnCount: 32 }
+    : profile === 'filter-4000x32'
+      ? { rowCount: 4_000, columnCount: 32 }
+      : { rowCount: 10_000, columnCount: 16 };
 
 const columnNames = ['ID', 'AMOUNT', 'NAME', 'EVENT_DATE', 'EVENT_AT', 'ACTIVE', 'CATEGORY', 'PAYLOAD', 'RANKING', 'SEARCH_LABEL', 'REFERENCE', 'QUANTITY', 'OPTIONAL_TEXT', 'RATIO', 'GROUP_KEY', 'DETAILS'];
 const columnTypes = ['INTEGER', 'NUMERIC(18,2)', 'VARCHAR(160)', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'VARCHAR(32)', 'VARCHAR(256)', 'INTEGER', 'VARCHAR(64)', 'VARCHAR(48)', 'INTEGER', 'VARCHAR(180)', 'DOUBLE', 'VARCHAR(32)', 'VARCHAR(512)'];
@@ -218,11 +220,12 @@ function App(): ReactElement {
   </main>;
 }
 
-if (profile === 'panel') {
+if (profile === 'panel' || profile === 'panel-wide') {
   document.body.innerHTML = '<div id="shared-ui-root"></div>';
   if (mountSharedResultPanel()) {
-    const panelColumns = columns.slice(0, 8);
-    const panelRows = rows.slice(0, 200).map(row => row.slice(0, 8));
+    const panelColumnCount = profile === 'panel-wide' ? 32 : 8;
+    const panelColumns = columns.slice(0, panelColumnCount);
+    const panelRows = rows.slice(0, 200).map(row => row.slice(0, panelColumnCount));
     const withBaseline = new URLSearchParams(window.location.search).has('baseline');
     const panelResultSets: Array<Record<string, unknown>> = [
             {

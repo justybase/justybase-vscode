@@ -42,6 +42,97 @@ test('columns sidebar finder scrolls the grid to a searched result column', asyn
   await expect(finder).toHaveValue('payload');
 });
 
+test('columns sidebar jump reveals a partially hidden column while grouped', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });
+  const panel = page.locator('#shared-ui-root');
+  await expect(panel.locator('.ui-result-grid')).toBeVisible();
+  await panel.getByRole('button', { name: 'Group by ID' }).click();
+  await expect(panel.locator('.ui-data-grid-group-row').first()).toBeVisible();
+  const scroller = panel.locator('.ui-data-grid-scroll');
+  await panel.getByRole('button', { name: 'Toggle column sidebar' }).click();
+  await settleLayout(page);
+
+  // Park the last column a few pixels past the right edge, as a user would
+  // when the target column is only slightly out of view.
+  const initialLeft = await scroller.evaluate(element => {
+    const header = [...element.querySelectorAll<HTMLTableCellElement>('.ui-data-grid thead th')]
+      .find(cell => (cell.textContent ?? '').includes('PAYLOAD'))!;
+    const contentLeft = header.getBoundingClientRect().left - element.getBoundingClientRect().left + element.scrollLeft;
+    element.scrollLeft = Math.max(0, contentLeft + header.getBoundingClientRect().width - element.clientWidth - 20);
+    element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    return element.scrollLeft;
+  });
+  await expect.poll(async () => scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+  const finder = panel.getByRole('textbox', { name: 'Find column' });
+  await finder.fill('payload');
+  await finder.press('Enter');
+  await expect.poll(async () => scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(initialLeft);
+
+  // The reserved scrollbar gutter must not keep the final column hidden.
+  const fullyVisible = await scroller.evaluate(element => {
+    const header = [...element.querySelectorAll<HTMLTableCellElement>('.ui-data-grid thead th')]
+      .find(cell => (cell.textContent ?? '').includes('PAYLOAD'))!;
+    return header.getBoundingClientRect().right <= element.getBoundingClientRect().left + element.clientWidth + 1;
+  });
+  expect(fullyVisible).toBe(true);
+  await expect(panel.getByRole('columnheader', { name: /PAYLOAD/ }).locator('.ui-data-grid-column-highlight')).toHaveCount(1);
+});
+
+test('columns sidebar jump uses painted column geometry when layout widths drift', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });
+  const panel = page.locator('#shared-ui-root');
+  await expect(panel.locator('.ui-result-grid')).toBeVisible();
+  const scroller = panel.locator('.ui-data-grid-scroll');
+  await panel.getByRole('button', { name: 'Toggle column sidebar' }).click();
+  await settleLayout(page);
+  const initialLeft = await scroller.evaluate(element => {
+    const header = [...element.querySelectorAll<HTMLTableCellElement>('.ui-data-grid thead th')]
+      .find(cell => (cell.textContent ?? '').includes('EVENT_AT'))!;
+    const contentLeft = header.getBoundingClientRect().left - element.getBoundingClientRect().left + element.scrollLeft;
+    element.scrollLeft = Math.max(0, contentLeft + header.getBoundingClientRect().width - element.clientWidth - 20);
+    element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    return element.scrollLeft;
+  });
+  await expect.poll(async () => scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+  const finder = panel.getByRole('textbox', { name: 'Find column' });
+  await finder.fill('event_at');
+  await finder.press('Enter');
+  await expect.poll(async () => scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(initialLeft);
+  const fullyVisible = await scroller.evaluate(element => {
+    const header = [...element.querySelectorAll<HTMLTableCellElement>('.ui-data-grid thead th')]
+      .find(cell => (cell.textContent ?? '').includes('EVENT_AT'))!;
+    return header.getBoundingClientRect().right <= element.getBoundingClientRect().left + element.clientWidth + 1;
+  });
+  expect(fullyVisible).toBe(true);
+});
+
+test('columns sidebar jump mounts and fully reveals a windowed column', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.goto('/test-harness/shared-data-grid.html?profile=panel-wide', { waitUntil: 'networkidle' });
+  const panel = page.locator('#shared-ui-root');
+  await expect(panel.locator('.ui-result-grid')).toBeVisible();
+  // DETAILS sits outside the mounted column window at scrollLeft 0 and its
+  // long values make the painted column much wider than the layout estimate.
+  await expect(panel.getByRole('columnheader', { name: /DETAILS/ })).toHaveCount(0);
+  const scroller = panel.locator('.ui-data-grid-scroll');
+  await panel.getByRole('button', { name: 'Toggle column sidebar' }).click();
+  await settleLayout(page);
+  const finder = panel.getByRole('textbox', { name: 'Find column' });
+  await finder.fill('details');
+  await finder.press('Enter');
+  await expect(panel.getByRole('columnheader', { name: /DETAILS/ })).toHaveCount(1);
+  const fullyVisible = (): Promise<boolean> => scroller.evaluate(element => {
+    const header = [...element.querySelectorAll<HTMLTableCellElement>('.ui-data-grid thead th')]
+      .find(cell => (cell.textContent ?? '').includes('DETAILS'));
+    return header !== undefined
+      && header.getBoundingClientRect().right <= element.getBoundingClientRect().left + element.clientWidth + 1;
+  });
+  await expect.poll(fullyVisible).toBe(true);
+  await expect.poll(async () => scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+});
+
 test('columns sidebar reorders result columns by dragging', async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 600 });
   await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });

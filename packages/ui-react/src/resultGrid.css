@@ -799,6 +799,15 @@ body.vscode-high-contrast-light .ui-data-grid-scroll {
   background: transparent;
 }
 
+/* Mirror the scroller's stable gutter at the end of the table's scrollable
+   extent without adding a column, so the last column can be fully revealed. */
+.ui-data-grid-scrollbar-gutter-spacer {
+  position: absolute;
+  top: 0;
+  height: 1px;
+  pointer-events: none;
+}
+
 .ui-data-grid tr.ui-data-grid-row-even td,
 .ui-data-grid tr.ui-data-grid-row-even th[scope='row'] {
   background: var(--justybase-grid-bg);
