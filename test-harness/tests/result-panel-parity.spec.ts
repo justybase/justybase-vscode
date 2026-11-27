@@ -477,7 +477,7 @@ test('layout switcher restores the Analytical view', async ({ page }) => {
   await panel.getByRole('menuitemradio', { name: 'Analytical' }).click();
   const analytical = panel.getByRole('region', { name: 'Analytical view' });
   await expect(analytical).toBeVisible();
-  await expect(analytical).toContainText('Groups compared with the whole result');
+  await expect(analytical).toContainText('Groups compared with Whole result');
   await analytical.getByRole('combobox', { name: 'Analytical group column', exact: true }).selectOption({ label: 'CATEGORY' });
   await expect(analytical.locator('.ui-analytical-status')).toContainText('5 groups');
   await expect(analytical.locator('.ui-analytical-groups tbody tr')).toHaveCount(5);
