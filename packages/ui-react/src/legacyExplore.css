@@ -1,0 +1,846 @@
+/* Explore/Analytical legacy surface. Extracted from the removed
+   media/resultPanel.css so the DOM-based Explore view keeps its cards,
+   histogram, chips and tables inside the shared Result Panel stylesheet. */
+
+.ui-legacy-explore .analysis-view {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 100%;
+}
+
+.ui-legacy-explore .analysis-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 8px;
+}
+
+.ui-legacy-explore .analysis-header-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ui-legacy-explore .analysis-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.ui-legacy-explore .analysis-subtitle {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.ui-legacy-explore .analysis-summary {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.ui-legacy-explore .analysis-note {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.9;
+}
+
+.ui-legacy-explore .analysis-empty {
+    padding: 18px;
+    border: 1px dashed var(--vscode-panel-border);
+    border-radius: 4px;
+    color: var(--vscode-descriptionForeground);
+    text-align: center;
+    font-style: italic;
+}
+
+.ui-legacy-explore .analysis-output {
+    min-height: 140px;
+    padding-bottom: 10px;
+}
+
+.ui-legacy-explore .analysis-table-wrapper {
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    overflow: auto;
+    background-color: var(--vscode-editor-background);
+    width: 100%;
+    max-height: 60vh;
+}
+
+.ui-legacy-explore .analysis-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+}
+
+.ui-legacy-explore .analysis-table th,
+.ui-legacy-explore .analysis-table td {
+    border: 1px solid var(--vscode-panel-border);
+    padding: 4px 8px;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.ui-legacy-explore .analysis-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.ui-legacy-explore .explore-filter-editor,
+.ui-legacy-explore .explore-selection-panel {
+    padding: 12px;
+    margin: 8px 0;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: var(--vscode-editor-background);
+}
+
+.ui-legacy-explore .explore-filter-editor input,
+.ui-legacy-explore .explore-filter-editor select {
+    max-width: 100%;
+    color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    padding: 4px;
+}
+
+.ui-legacy-explore .explore-filter-editor > div,
+.ui-legacy-explore .explore-selection-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.ui-legacy-explore .explore-filter-editor h3,
+.ui-legacy-explore .explore-selection-panel h3,
+.ui-legacy-explore .explore-selection-panel > div,
+.ui-legacy-explore .explore-selection-panel > details,
+.ui-legacy-explore .explore-selection-panel > p {
+    flex-basis: 100%;
+    min-width: 0;
+}
+
+.ui-legacy-explore .explore-value-options {
+    flex-basis: 100%;
+    max-height: 240px;
+    overflow: auto;
+}
+
+.ui-legacy-explore .explore-value-options label {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    gap: 8px;
+    overflow-wrap: anywhere;
+}
+
+.ui-legacy-explore .explore-selection-panel pre,
+.ui-legacy-explore .explore-view pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ui-legacy-explore .explore-top-row[role=button]:focus-visible,
+.ui-legacy-explore .explore-view button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+}
+
+.ui-legacy-explore .explore-ranking-chart {
+    width: 100%; min-width: 0;
+}
+
+.ui-legacy-explore .explore-view .explore-table-wrapper {
+    max-width: 100%; overflow: auto;
+}
+
+.ui-legacy-explore .explore-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+    align-content: start;
+}
+
+.ui-legacy-explore .explore-column-card {
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background-color: var(--vscode-editor-background);
+    min-width: 0;
+}
+
+.ui-legacy-explore .explore-column-card:hover {
+    border-color: var(--vscode-focusBorder);
+}
+
+.ui-legacy-explore .explore-column-card-focus {
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.ui-legacy-explore .explore-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.ui-legacy-explore .explore-card-name {
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+}
+
+.ui-legacy-explore .explore-card-type {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.75;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    text-align: right;
+}
+
+.ui-legacy-explore .explore-role-badge {
+    flex-shrink: 0;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.ui-legacy-explore .explore-role-badge.explore-role-measure {
+    background: var(--vscode-charts-blue, #519aba);
+    color: #ffffff;
+}
+
+.ui-legacy-explore .explore-role-badge.explore-role-dimension {
+    background: var(--vscode-charts-green, #89d185);
+    color: #1e1e1e;
+}
+
+.ui-legacy-explore .explore-role-badge.explore-role-date {
+    background: var(--vscode-charts-purple, #b180d7);
+    color: #ffffff;
+}
+
+.ui-legacy-explore .explore-role-badge.explore-role-unknown {
+    background: var(--vscode-descriptionForeground);
+    color: #ffffff;
+}
+
+.ui-legacy-explore .explore-card-stats {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ui-legacy-explore .explore-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.ui-legacy-explore .explore-stat-value {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 130px;
+}
+
+.ui-legacy-explore .explore-stat-value.explore-stat-wide {
+    max-width: 180px;
+    font-size: 11px;
+}
+
+.ui-legacy-explore .explore-stat-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.ui-legacy-explore .explore-null-bar {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--vscode-panel-border);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.ui-legacy-explore .explore-null-bar-fill {
+    height: 100%;
+    background: var(--vscode-progressBar-background);
+    border-radius: 2px;
+}
+
+.ui-legacy-explore .explore-histogram {
+    width: 100%;
+    height: 46px;
+    color: var(--vscode-charts-blue);
+    flex-shrink: 0;
+}
+
+.ui-legacy-explore .explore-histogram svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.ui-legacy-explore .explore-histogram rect {
+    fill: currentColor;
+}
+
+.ui-legacy-explore .explore-top-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.ui-legacy-explore .explore-top-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+}
+
+.ui-legacy-explore .explore-top-value {
+    flex: 0 0 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ui-legacy-explore .explore-top-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--vscode-panel-border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.ui-legacy-explore .explore-top-bar span {
+    display: block;
+    height: 100%;
+    background: var(--vscode-charts-green, #89d185);
+    border-radius: 3px;
+}
+
+.ui-legacy-explore .explore-top-count {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--vscode-descriptionForeground);
+}
+
+.ui-legacy-explore .explore-empty {
+    padding: 24px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    text-align: center;
+}
+
+.ui-legacy-explore .explore-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    flex-shrink: 0;
+}
+
+.ui-legacy-explore .explore-tab-btn {
+    padding: 6px 14px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.ui-legacy-explore .explore-tab-btn:hover {
+    color: var(--vscode-foreground);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.ui-legacy-explore .explore-tab-btn.active {
+    color: var(--vscode-foreground);
+    border-bottom-color: var(--vscode-focusBorder);
+    font-weight: 600;
+}
+
+.ui-legacy-explore .explore-quality-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+}
+
+.ui-legacy-explore .explore-quality-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    white-space: nowrap;
+}
+
+.ui-legacy-explore .explore-quality-chip.warn {
+    background: var(--vscode-inputValidation-warningBackground);
+    color: var(--vscode-inputValidation-warningForeground, var(--vscode-editor-foreground));
+    border: 1px solid var(--vscode-inputValidation-warningBorder);
+}
+
+.ui-legacy-explore .explore-quality-chip.correlation {
+    background: var(--vscode-charts-purple, #b180d7);
+    color: #ffffff;
+}
+
+.ui-legacy-explore .explore-filter-bar-container {
+    flex-shrink: 0;
+}
+
+.ui-legacy-explore .explore-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: var(--vscode-sideBar-background);
+}
+
+.ui-legacy-explore .explore-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
+.ui-legacy-explore .explore-filter-hint {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+.ui-legacy-explore .explore-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    border-radius: 3px;
+    font-size: 11px;
+    max-width: 260px;
+    cursor: default;
+}
+
+.ui-legacy-explore .explore-filter-chip-dimension {
+    background: var(--vscode-charts-green, #89d185);
+    color: #1e1e1e;
+}
+
+.ui-legacy-explore .explore-filter-chip-date {
+    background: var(--vscode-charts-purple, #b180d7);
+    color: #ffffff;
+}
+
+.ui-legacy-explore .explore-filter-chip-measure {
+    background: var(--vscode-charts-blue, #519aba);
+    color: #ffffff;
+}
+
+.ui-legacy-explore .explore-filter-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ui-legacy-explore .explore-filter-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+    border-radius: 2px;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.ui-legacy-explore .explore-filter-chip-remove:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.ui-legacy-explore .explore-filter-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.ui-legacy-explore .explore-filter-action {
+    padding: 3px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.ui-legacy-explore .explore-filter-action:hover:not(:disabled) {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.ui-legacy-explore .explore-filter-action:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.ui-legacy-explore .explore-card-actions {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.ui-legacy-explore .explore-card-action {
+    padding: 2px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-textLink-foreground);
+    cursor: pointer;
+    font-size: 10px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.ui-legacy-explore .explore-card-action:hover {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.ui-legacy-explore .explore-card-inline-form {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding-top: 2px;
+}
+
+.ui-legacy-explore .explore-inline-input {
+    flex: 1;
+    min-width: 70px;
+    padding: 2px 6px;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 3px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-size: 11px;
+    font-family: inherit;
+}
+
+.ui-legacy-explore .explore-inline-apply,
+.ui-legacy-explore .explore-inline-clear {
+    padding: 2px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 10px;
+    font-family: inherit;
+}
+
+.ui-legacy-explore .explore-inline-apply {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background);
+}
+
+.ui-legacy-explore .explore-full-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.ui-legacy-explore .explore-full-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px 10px;
+}
+
+.ui-legacy-explore .explore-full-stat {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.ui-legacy-explore .explore-full-stat-label {
+    color: var(--vscode-descriptionForeground);
+}
+
+.ui-legacy-explore .explore-full-stat-value {
+    font-variant-numeric: tabular-nums;
+    color: var(--vscode-foreground);
+}
+
+.ui-legacy-explore .explore-sql-link {
+    border: none;
+    background: transparent;
+    color: var(--vscode-textLink-foreground);
+    cursor: pointer;
+    font-size: 10px;
+    font-family: inherit;
+    padding: 0;
+    text-align: left;
+}
+
+.ui-legacy-explore .explore-sql-link:hover {
+    text-decoration: underline;
+}
+
+.ui-legacy-explore .explore-top-row.is-active {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+    border-radius: 3px;
+}
+
+.ui-legacy-explore .explore-tab-config {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+    padding: 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: var(--vscode-sideBar-background);
+    flex-shrink: 0;
+}
+
+.ui-legacy-explore .explore-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    min-width: 90px;
+}
+
+.ui-legacy-explore .explore-config-field select {
+    padding: 3px 6px;
+    border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+    border-radius: 3px;
+    background: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    font-size: 11px;
+    font-family: inherit;
+    max-width: 180px;
+}
+
+.ui-legacy-explore .explore-config-field select[multiple] {
+    min-height: 72px;
+}
+
+.ui-legacy-explore .explore-config-field.explore-config-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+    text-transform: none;
+    letter-spacing: 0;
+    padding-bottom: 5px;
+}
+
+.ui-legacy-explore .explore-config-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding-bottom: 2px;
+}
+
+.ui-legacy-explore .explore-primary-btn {
+    padding: 4px 14px;
+    border: 1px solid var(--vscode-button-background);
+    border-radius: 3px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background 0.15s ease;
+}
+
+.ui-legacy-explore .explore-primary-btn:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.ui-legacy-explore .explore-secondary-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.ui-legacy-explore .explore-secondary-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.ui-legacy-explore .explore-tab-results {
+    min-height: 120px;
+}
+
+.ui-legacy-explore .explore-loading {
+    padding: 24px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    text-align: center;
+}
+
+.ui-legacy-explore .explore-error {
+    padding: 12px;
+    color: var(--vscode-errorForeground);
+    font-size: 11px;
+    background: var(--vscode-inputValidation-errorBackground);
+    border: 1px solid var(--vscode-inputValidation-errorBorder);
+    border-radius: 3px;
+    white-space: pre-wrap;
+}
+
+.ui-legacy-explore .explore-note {
+    padding: 6px 8px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    font-style: italic;
+}
+
+.ui-legacy-explore .explore-table-wrapper {
+    overflow: auto;
+    max-height: 480px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+}
+
+.ui-legacy-explore .explore-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.ui-legacy-explore .explore-table th,
+.ui-legacy-explore .explore-table td {
+    padding: 4px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    white-space: nowrap;
+    text-align: left;
+}
+
+.ui-legacy-explore .explore-table th {
+    position: sticky;
+    top: 0;
+    background: var(--vscode-editorGroupHeader-tabsBackground);
+    z-index: 1;
+}
+
+.ui-legacy-explore .explore-pivot-table .explore-pivot-row-name {
+    font-weight: 500;
+}
+
+.ui-legacy-explore .explore-pivot-table .explore-pivot-total {
+    font-weight: 600;
+    background: var(--vscode-sideBar-background);
+    font-variant-numeric: tabular-nums;
+}
+
+.ui-legacy-explore .explore-pivot-table tfoot .explore-pivot-total {
+    position: sticky;
+    bottom: 0;
+}
+
+.ui-legacy-explore .explore-pivot-table .explore-pivot-cell.is-null {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+.ui-legacy-explore .explore-pivot-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+}
+
+.ui-legacy-explore .explore-chart-area {
+    min-height: 240px;
+}
+
+.ui-legacy-explore .explore-composer-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+}
+
+.ui-legacy-explore .explore-composer-chart {
+    width: 100%;
+    height: 320px;
+}
+
+/* Share of non-null rows next to each top value (dominance at a glance). */
+.ui-legacy-explore .explore-top-share {
+    flex: 0 0 46px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--vscode-descriptionForeground);
+}
+
+.ui-legacy-explore .explore-database-status {
+    color: var(--vscode-descriptionForeground);
+}

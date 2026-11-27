@@ -1,6 +1,7 @@
 /* Shared result-grid skin. The VS Code result panel is the visual reference;
    product shells only provide the surrounding surface and theme variables. */
 @import './tokens.css';
+@import './legacyExplore.css';
 
 html,
 body,
@@ -2948,6 +2949,11 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
   height: 100%;
   flex: 1 1 auto;
   overflow: auto;
+  box-sizing: border-box;
+  padding: 12px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-bg);
+  border-left: 0;
 }
 
 /* Range chart layout: ECharts canvas plus a compact setup sidebar. */

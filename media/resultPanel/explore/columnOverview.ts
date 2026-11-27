@@ -61,8 +61,13 @@ function collectTopValues(values: readonly unknown[], limit: number): { values: 
         counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    const total = values.length;
     return {
-        values: sorted.slice(0, limit).map(([value, count]) => ({ value, count })),
+        values: sorted.slice(0, limit).map(([value, count]) => ({
+            value,
+            count,
+            share: total > 0 ? count / total : 0,
+        })),
         distinctCount: distinct,
         topTruncated: distinct > limit,
     };

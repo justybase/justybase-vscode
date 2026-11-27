@@ -29,6 +29,8 @@ export interface ExploreHistogramBin {
 export interface ExploreTopValue {
     value: string;
     count: number;
+    /** Share of non-null examined rows (0..1). */
+    share?: number;
 }
 
 export interface ExploreColumnOverview {

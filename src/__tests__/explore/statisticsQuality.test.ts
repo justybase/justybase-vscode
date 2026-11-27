@@ -87,6 +87,80 @@ describe('explore quality alerts', () => {
         );
         expect(alerts).toHaveLength(0);
     });
+
+    it('flags a dominant value and a concentrated top pair', () => {
+        const dominant = computeQualityAlerts(
+            [meta('dimension', 0)],
+            [overview({
+                distinctCount: 20,
+                topValues: [
+                    { value: 'A', count: 70, share: 0.7 },
+                    { value: 'B', count: 10, share: 0.1 },
+                ],
+            })],
+        );
+        expect(dominant).toContainEqual(expect.objectContaining({
+            severity: 'warn',
+            message: 'Top value "A" covers 70% of rows',
+        }));
+
+        const concentrated = computeQualityAlerts(
+            [meta('dimension', 0)],
+            [overview({
+                distinctCount: 20,
+                topValues: [
+                    { value: 'A', count: 30, share: 0.3 },
+                    { value: 'B', count: 30, share: 0.3 },
+                ],
+            })],
+        );
+        expect(concentrated).toContainEqual(expect.objectContaining({
+            severity: 'info',
+            message: 'Top 2 values cover 60% of rows',
+        }));
+
+        const severe = computeQualityAlerts(
+            [meta('dimension', 0)],
+            [overview({
+                distinctCount: 20,
+                topValues: [
+                    { value: 'A', count: 40, share: 0.4 },
+                    { value: 'B', count: 40, share: 0.4 },
+                ],
+            })],
+        );
+        expect(severe).toContainEqual(expect.objectContaining({
+            severity: 'warn',
+            message: 'Top 2 values cover 80% of rows',
+        }));
+    });
+
+    it('ignores two-value concentration on low-cardinality and healthy columns', () => {
+        const binary = computeQualityAlerts(
+            [meta('dimension', 0)],
+            [overview({
+                distinctCount: 2,
+                topValues: [
+                    { value: 'Y', count: 50, share: 0.5 },
+                    { value: 'N', count: 50, share: 0.5 },
+                ],
+            })],
+        );
+        expect(binary).toHaveLength(0);
+
+        const healthy = computeQualityAlerts(
+            [meta('dimension', 0)],
+            [overview({
+                distinctCount: 20,
+                topValues: Array.from({ length: 8 }, (_, index) => ({
+                    value: `V${index}`,
+                    count: 5,
+                    share: 0.05,
+                })),
+            })],
+        );
+        expect(healthy).toHaveLength(0);
+    });
 });
 
 describe('explore correlations', () => {

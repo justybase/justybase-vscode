@@ -10,7 +10,7 @@ import { fetchExploreRows } from './rows.js';
 import { classifyColumnRole } from './columnClassification.js';
 import { computeColumnOverviews } from './columnOverview.js';
 import { filterExploreRows, columnsMetaForRows } from './filtering.js';
-import { computeQualityAlerts, computeMeasureCorrelations } from './quality.js';
+import { computeQualityAlerts, computeMeasureCorrelations, formatSharePercent } from './quality.js';
 import { renderFilterEditor } from './filterEditor.js';
 import { showSelectionActions, type ExploreSelection } from './selectionActions.js';
 import { renderRankingTab, disposeRankingView, type RankingViewState } from './rankingTab.js';
@@ -270,9 +270,12 @@ function buildCard(
             <div class="explore-stat"><span class="explore-stat-value">${overview.distinctCount.toLocaleString()}</span><span class="explore-stat-label">distinct</span></div>
         `;
     } else {
+        const top = overview.topValues?.[0];
+        const nonNull = overview.examinedRows - overview.nullCount;
+        const topShare = top ? (top.share ?? (nonNull > 0 ? top.count / nonNull : 0)) : undefined;
         stats.innerHTML = `
             <div class="explore-stat"><span class="explore-stat-value">${overview.distinctCount.toLocaleString()}${overview.distinctTruncated ? '+' : ''}</span><span class="explore-stat-label">distinct</span></div>
-            <div class="explore-stat"><span class="explore-stat-value">${formatNumber(overview.topValues?.[0]?.count)}</span><span class="explore-stat-label">top count</span></div>
+            <div class="explore-stat"><span class="explore-stat-value">${formatNumber(top?.count)}${topShare === undefined ? '' : ` · ${formatSharePercent(topShare)}`}</span><span class="explore-stat-label">top value</span></div>
             <div class="explore-stat"><span class="explore-stat-value">${overview.nullCount.toLocaleString()}</span><span class="explore-stat-label">nulls</span></div>
         `;
     }
@@ -311,12 +314,14 @@ function buildCard(
     } else {
         const top = overview.topValues ?? [];
         if (top.length > 0) {
-            const maxCount = Math.max(...top.map(item => item.count), 1);
+            const nonNull = overview.examinedRows - overview.nullCount;
             const topList = document.createElement('div');
             topList.className = 'explore-top-list';
             const dimensionFilter = filters.dimensions.find(item => item.columnIndex === overview.index);
             const activeValues = new Set(dimensionFilter?.values ?? []);
             top.slice(0, EXPLORE_TOP_VALUES).forEach(item => {
+                const share = item.share ?? (nonNull > 0 ? item.count / nonNull : 0);
+                const shareLabel = formatSharePercent(share);
                 const row = document.createElement('div');
                 row.className = 'explore-top-row' + (activeValues.has(item.value) ? ' is-active' : '');
                 row.title = 'Explore this value';
@@ -325,8 +330,9 @@ function buildCard(
                 row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggleDimension(overview.index, item.value); } });
                 row.innerHTML = `
                     <span class="explore-top-value">${escapeHtml(item.value)}</span>
-                    <span class="explore-top-bar"><span style="width:${Math.max(2, (item.count / maxCount) * 100).toFixed(1)}%"></span></span>
+                    <span class="explore-top-bar" title="${item.count.toLocaleString()} rows · ${shareLabel} of non-null rows"><span style="width:${Math.max(2, share * 100).toFixed(1)}%"></span></span>
                     <span class="explore-top-count">${item.count.toLocaleString()}</span>
+                    <span class="explore-top-share">${shareLabel}</span>
                 `;
                 row.addEventListener('click', () => onToggleDimension(overview.index, item.value));
                 topList.appendChild(row);

@@ -24,6 +24,27 @@ export interface MeasureCorrelation {
 
 export const HIGH_NULL_RATE = 0.3;
 
+/** A single value covering at least this share of non-null rows is dominant. */
+export const DOMINANT_VALUE_SHARE = 0.6;
+
+/** Two values covering at least this share of non-null rows are concentrated. */
+export const TOP_TWO_SHARE = 0.5;
+
+/** Concentration above this share is severe enough to warn instead of inform. */
+export const TOP_TWO_WARN_SHARE = 0.75;
+
+/** Ignore two-value concentration on low-cardinality columns (e.g. a 2-value flag). */
+export const CONCENTRATION_MIN_DISTINCT = 10;
+
+export function formatSharePercent(share: number): string {
+    const percent = Math.round(share * 1000) / 10;
+    return `${Number.isInteger(percent) ? percent.toFixed(0) : percent.toFixed(1)}%`;
+}
+
+function displayValue(value: string): string {
+    return value.length > 32 ? `${value.slice(0, 31)}…` : value;
+}
+
 export function computeQualityAlerts(
     columns: readonly ExploreColumnMeta[],
     overviews: readonly ExploreColumnOverview[],
@@ -65,6 +86,33 @@ export function computeQualityAlerts(
                     columnName: meta.name,
                     message: 'All values unique (high cardinality)',
                 });
+            } else {
+                const nonNull = overview.examinedRows - overview.nullCount;
+                const topValues = overview.topValues ?? [];
+                if (nonNull > 0 && topValues.length > 0) {
+                    const shareOf = (value: { count: number; share?: number }): number =>
+                        typeof value.share === 'number' ? value.share : value.count / nonNull;
+                    const first = topValues[0];
+                    const firstShare = shareOf(first);
+                    if (overview.distinctCount >= 2 && firstShare >= DOMINANT_VALUE_SHARE) {
+                        alerts.push({
+                            severity: 'warn',
+                            columnIndex: overview.index,
+                            columnName: meta.name,
+                            message: `Top value "${displayValue(first.value)}" covers ${formatSharePercent(firstShare)} of rows`,
+                        });
+                    } else if (overview.distinctCount >= CONCENTRATION_MIN_DISTINCT && topValues.length >= 2) {
+                        const topTwoShare = firstShare + shareOf(topValues[1]);
+                        if (topTwoShare >= TOP_TWO_SHARE) {
+                            alerts.push({
+                                severity: topTwoShare >= TOP_TWO_WARN_SHARE ? 'warn' : 'info',
+                                columnIndex: overview.index,
+                                columnName: meta.name,
+                                message: `Top 2 values cover ${formatSharePercent(topTwoShare)} of rows`,
+                            });
+                        }
+                    }
+                }
             }
         }
     }

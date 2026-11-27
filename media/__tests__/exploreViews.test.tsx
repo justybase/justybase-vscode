@@ -56,6 +56,8 @@ describe('Explore views and lifecycle', () => {
     it('renders profiles, sample scope and keyboard selection actions', async () => {
         renderExploreView(0); await settle();
         expect(root.textContent).toContain('All loaded rows'); expect(root.textContent).toContain('Charts');
+        expect(root.querySelector('.explore-top-share')?.textContent).toBe('66.7%');
+        expect(root.querySelector('#exploreQualityBanner')?.textContent).toContain('Top value "A" covers 66.7% of rows');
         const value = root.querySelector<HTMLElement>('.explore-top-row')!;
         value.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
         expect(root.textContent).toContain('Filter to selection'); click(root, 'Filter to selection');

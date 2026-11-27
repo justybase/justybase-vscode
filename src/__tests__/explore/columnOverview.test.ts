@@ -63,7 +63,21 @@ describe('explore columnOverview', () => {
         expect(overview.distinctCount).toBe(3);
         expect(overview.distinctTruncated).toBe(false);
         expect(overview.topValues).toHaveLength(3);
-        expect(overview.topValues?.[0]).toEqual({ value: 'region-0', count: 10 });
+        expect(overview.topValues?.[0]).toMatchObject({ value: 'region-0', count: 10 });
+        expect(overview.topValues?.[0]?.share).toBeCloseTo(10 / 30, 5);
+    });
+
+    it('computes top-value shares against non-null rows only', () => {
+        const columns: ExploreColumnMeta[] = [
+            { index: 0, name: 'FLAG', type: 'VARCHAR(1)', role: 'dimension' },
+        ];
+        const rows = [['Y'], ['Y'], ['N'], [null], ['']];
+
+        const [overview] = computeColumnOverviews(columns, rows, rows.length);
+
+        expect(overview.nullCount).toBe(2);
+        expect(overview.topValues?.[0]).toMatchObject({ value: 'Y', count: 2 });
+        expect(overview.topValues?.[0]?.share).toBeCloseTo(2 / 3, 5);
     });
 
     it('computes min/max for date columns', () => {
