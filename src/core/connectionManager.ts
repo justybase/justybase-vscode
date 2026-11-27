@@ -54,6 +54,20 @@ interface PersistedDocumentConnectionContextsState {
 }
 
 /**
+ * Reusing a cached Netezza tab socket after at least this much idle time runs a
+ * cheap `SELECT CURRENT_SID` liveness probe first. An actively used tab never
+ * probes, while a tab that sat idle past the server/network idle limit is
+ * checked before the user's SQL is sent.
+ *
+ * The stale-session symptom is specific to the Netezza driver, which has no
+ * socket keepalive and reports the server's empty ErrorResponse as a database
+ * error. Other dialects keep their own recovery behaviour.
+ */
+const PERSISTENT_CONNECTION_IDLE_VALIDATION_MS = 60_000;
+const PERSISTENT_CONNECTION_PROBE_TIMEOUT_SECONDS = 5;
+const PERSISTENT_CONNECTION_PROBE_SQL = 'SELECT CURRENT_SID';
+
+/**
  * Only persisted files get a durable tab context. Untitled documents and
  * notebook cells are intentionally ephemeral, just like SQL Console tabs.
  */
@@ -372,6 +386,12 @@ export class ConnectionManager {
 
     // Per-document persistent connection metadata: Map<documentUri, { connectionName: string; database: string; lastSessionId?: string }>
     private _documentPersistentConnectionMeta: Map<string, { connectionName: string; database: string; lastSessionId?: string }> = new Map();
+
+    // Last time a cached tab socket was handed out (or freshly opened).
+    private _documentConnectionLastUsedAt: Map<string, number> = new Map();
+
+    // Deduplicate concurrent idle liveness probes for the same tab.
+    private _documentConnectionValidationPromises: Map<string, Promise<boolean>> = new Map();
 
     // Per-document keep connection open setting: Map<documentUri, boolean>
     // Default is true for new documents
@@ -1108,6 +1128,9 @@ export class ConnectionManager {
 
         const existing = this._documentPersistentConnections.get(normalizedUri);
         const existingMeta = this._documentPersistentConnectionMeta.get(normalizedUri);
+        const connectionKind = resolveConnectionDatabaseKind(
+            resolveStoredDatabaseKind(details) ?? details.dbType,
+        );
 
         // If existing connection does not match current connection/database, close it
         if (existing && existingMeta) {
@@ -1115,10 +1138,19 @@ export class ConnectionManager {
                 existingMeta.connectionName === targetName && existingMeta.database === effectiveDatabase;
 
             if (metaMatches) {
-                return existing;
+                const usable = await this.isCachedDocumentConnectionUsable(
+                    normalizedUri,
+                    existing,
+                    connectionKind,
+                );
+                if (usable) {
+                    return existing;
+                }
+                // The idle probe found a dead session and dropped it; fall
+                // through so the caller receives a freshly opened connection.
+            } else {
+                await this.closeDocumentPersistentConnection(normalizedUri);
             }
-
-            await this.closeDocumentPersistentConnection(normalizedUri);
         } else if (existing && !existingMeta) {
             // No metadata means we cannot safely verify; close and recreate
             await this.closeDocumentPersistentConnection(normalizedUri);
@@ -1164,6 +1196,7 @@ export class ConnectionManager {
                     connectionName: targetName,
                     database: effectiveDatabase
                 });
+                this._documentConnectionLastUsedAt.set(normalizedUri, Date.now());
                 return conn;
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
@@ -1199,6 +1232,88 @@ export class ConnectionManager {
         return connectPromise;
     }
 
+    /**
+     * Probe a cached tab socket before reuse when it has not been checked for
+     * a while. An idle Netezza session can stay registered client-side while the
+     * server/network already dropped it; the next query then fails with the
+     * driver's empty ErrorResponse. Checking first turns that user-visible
+     * failure into a transparent reconnect.
+     *
+     * A failed probe closes the dead socket. A busy socket is treated as alive:
+     * the probe can race a command that is already running on the same tab.
+     */
+    private async isCachedDocumentConnectionUsable(
+        normalizedUri: string,
+        connection: NzConnection,
+        kind: DatabaseKind,
+    ): Promise<boolean> {
+        if (kind !== 'netezza') {
+            return true;
+        }
+
+        // A probe in flight decides for every concurrent caller, including one
+        // that would otherwise see the just-updated last-used timestamp.
+        const pending = this._documentConnectionValidationPromises.get(normalizedUri);
+        if (pending) {
+            return pending;
+        }
+
+        const now = Date.now();
+        const lastUsedAt = this._documentConnectionLastUsedAt.get(normalizedUri);
+        this._documentConnectionLastUsedAt.set(normalizedUri, now);
+        if (
+            lastUsedAt !== undefined
+            && now - lastUsedAt < PERSISTENT_CONNECTION_IDLE_VALIDATION_MS
+        ) {
+            return true;
+        }
+
+        const validation = (async (): Promise<boolean> => {
+            try {
+                const command = connection.createCommand(PERSISTENT_CONNECTION_PROBE_SQL);
+                command.commandTimeout = PERSISTENT_CONNECTION_PROBE_TIMEOUT_SECONDS;
+                const reader = await command.executeReader();
+                try {
+                    await reader.read();
+                } finally {
+                    await reader.close();
+                }
+                return true;
+            } catch (error: unknown) {
+                if (error instanceof Error && error.message.includes('Connection is already executing a command')) {
+                    return true;
+                }
+                const message = error instanceof Error ? error.message : String(error);
+                logWithFallback(
+                    'warn',
+                    `[ConnectionManager] Idle tab connection for ${normalizedUri} failed its liveness probe: ${message}`,
+                );
+                // Drop the dead session inside the shared probe promise so every
+                // concurrent caller observes the closed socket and a bumped
+                // generation before it starts opening a replacement.
+                try {
+                    await this.closeDocumentPersistentConnection(normalizedUri);
+                } catch (closeError: unknown) {
+                    logWithFallback(
+                        'warn',
+                        `[ConnectionManager] Failed to close dead tab connection for ${normalizedUri}:`,
+                        closeError,
+                    );
+                }
+                return false;
+            }
+        })();
+
+        this._documentConnectionValidationPromises.set(normalizedUri, validation);
+        try {
+            return await validation;
+        } finally {
+            if (this._documentConnectionValidationPromises.get(normalizedUri) === validation) {
+                this._documentConnectionValidationPromises.delete(normalizedUri);
+            }
+        }
+    }
+
     private bumpDocumentConnectionGeneration(normalizedUri: string): number {
         const nextGeneration = (this._documentConnectionGenerations.get(normalizedUri) ?? 0) + 1;
         this._documentConnectionGenerations.set(normalizedUri, nextGeneration);
@@ -1221,6 +1336,7 @@ export class ConnectionManager {
         const conn = this._documentPersistentConnections.get(normalizedUri);
         const pendingOpen = this._documentConnectionPromises.get(normalizedUri)?.promise;
         if (!conn && !pendingOpen) {
+            this._documentConnectionLastUsedAt.delete(normalizedUri);
             return;
         }
 
@@ -1242,6 +1358,7 @@ export class ConnectionManager {
             if (this._documentPersistentConnections.get(normalizedUri) === conn) {
                 this._documentPersistentConnections.delete(normalizedUri);
                 this._documentPersistentConnectionMeta.delete(normalizedUri);
+                this._documentConnectionLastUsedAt.delete(normalizedUri);
             }
         })();
 
@@ -1277,6 +1394,7 @@ export class ConnectionManager {
         // the replacement. Completion of that close is identity-checked below.
         this._documentPersistentConnections.delete(normalizedUri);
         this._documentPersistentConnectionMeta.delete(normalizedUri);
+        this._documentConnectionLastUsedAt.delete(normalizedUri);
         this._documentConnectionPromises.delete(normalizedUri);
         if (pendingClose) {
             this._documentConnectionClosePromises.delete(normalizedUri);

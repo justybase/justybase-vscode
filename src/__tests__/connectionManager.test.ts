@@ -1386,6 +1386,130 @@ describe('ConnectionManager', () => {
             await expect(newPersistentPromise).resolves.toBe(newConnection);
             expect(manager.getConnectionForExecution(documentUri)).toBe('NewConnection');
         });
+
+        it('reuses an active tab socket without probing it', async () => {
+            await manager.saveConnection(sampleConnection);
+            const documentUri = 'file:///active-tab.sql';
+            const connection = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+            const createCommand = jest.spyOn(connection, 'createCommand');
+
+            const reused = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+
+            expect(reused).toBe(connection);
+            expect(createCommand).not.toHaveBeenCalled();
+        });
+
+        it('probes an idle tab socket and keeps a healthy connection', async () => {
+            jest.useFakeTimers();
+            try {
+                await manager.saveConnection(sampleConnection);
+                const documentUri = 'file:///idle-healthy.sql';
+                const connection = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+                const createCommand = jest.spyOn(connection, 'createCommand');
+
+                jest.advanceTimersByTime(61_000);
+                const reused = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+
+                expect(reused).toBe(connection);
+                expect(createCommand).toHaveBeenCalledWith('SELECT CURRENT_SID');
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('drops and reopens an idle tab socket when the liveness probe fails', async () => {
+            jest.useFakeTimers();
+            try {
+                await manager.saveConnection(sampleConnection);
+                const documentUri = 'file:///idle-stale.sql';
+                const connection = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+                const close = jest.spyOn(connection, 'close');
+
+                jest.advanceTimersByTime(61_000);
+                const emptyResponse = Object.assign(
+                    new Error('Netezza backend returned an empty error response'),
+                    {
+                        name: 'NzDatabaseError',
+                        dbMessage: 'Netezza backend returned an empty error response',
+                        diagnostics: {},
+                        raw: '',
+                    },
+                );
+                jest.spyOn(connection, 'createCommand').mockImplementationOnce(() => {
+                    throw emptyResponse;
+                });
+
+                const replacement = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+
+                expect(replacement).not.toBe(connection);
+                expect(close).toHaveBeenCalledTimes(1);
+                expect(manager.hasDocumentPersistentConnection(documentUri)).toBe(true);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('keeps a busy tab socket when the liveness probe races an active command', async () => {
+            jest.useFakeTimers();
+            try {
+                await manager.saveConnection(sampleConnection);
+                const documentUri = 'file:///idle-busy.sql';
+                const connection = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+                const close = jest.spyOn(connection, 'close');
+
+                jest.advanceTimersByTime(61_000);
+                jest.spyOn(connection, 'createCommand').mockImplementationOnce(() => {
+                    throw new Error('Connection is already executing a command');
+                });
+
+                const reused = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+
+                expect(reused).toBe(connection);
+                expect(close).not.toHaveBeenCalled();
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('shares one idle liveness probe between concurrent callers', async () => {
+            jest.useFakeTimers();
+            try {
+                await manager.saveConnection(sampleConnection);
+                const documentUri = 'file:///idle-concurrent.sql';
+                const connection = await manager.getDocumentPersistentConnection(documentUri, sampleConnection.name);
+                const createCommand = jest.spyOn(connection, 'createCommand');
+                jest.advanceTimersByTime(61_000);
+
+                const [first, second] = await Promise.all([
+                    manager.getDocumentPersistentConnection(documentUri, sampleConnection.name),
+                    manager.getDocumentPersistentConnection(documentUri, sampleConnection.name),
+                ]);
+
+                expect(first).toBe(connection);
+                expect(second).toBe(connection);
+                expect(createCommand).toHaveBeenCalledTimes(1);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('does not probe non-Netezza connections', async () => {
+            jest.useFakeTimers();
+            try {
+                await manager.saveConnection(sqliteConnection);
+                const documentUri = 'file:///local-idle.sql';
+                const connection = await manager.getDocumentPersistentConnection(documentUri, sqliteConnection.name);
+                const createCommand = jest.spyOn(connection, 'createCommand');
+
+                jest.advanceTimersByTime(61_000);
+                const reused = await manager.getDocumentPersistentConnection(documentUri, sqliteConnection.name);
+
+                expect(reused).toBe(connection);
+                expect(createCommand).not.toHaveBeenCalled();
+            } finally {
+                jest.useRealTimers();
+            }
+        });
     });
 
     describe('Per-Document Database Override', () => {
