@@ -88,12 +88,16 @@ import { classifyColumns } from './explore/columnClassification.js';
 import { appendRunLogRows } from './logRunGroups.js';
 import { updateSqlQueueLogs } from './sqlQueueLogs.js';
 import { focusExploreColumn } from './explore/focusColumn.js';
+import { buildDatabaseColumnStatistics, computeLoadedColumnStatistics, type SharedColumnStatistics } from './columnStatistics.js';
+import { ColumnStatisticsDialog } from './columnStatisticsDialog.js';
 import { SharedAnalyticalView } from './sharedAnalytical.js';
 import type { SharedRangeChartProps } from './sharedRangeChart.js';
 import { handleExploreHostMessage, requestExploreOperation } from './explore/hostBridge.js';
 import { clearExploreRowRequests, handleExploreRowWindow } from './explore/rows.js';
 import { clearExploreContext, setExploreContext } from './explore/context.js';
 import type { LogRow, ResultSet } from './types.js';
+
+const COLUMN_STATISTICS_FUNCTIONS = ['count', 'countDistinct', 'sum', 'avg', 'min', 'max', 'stdev'] as const;
 
 interface SharedColumn {
     readonly name: string;
@@ -1325,6 +1329,46 @@ export class SharedResultPanelController {
             }
         }
         return calculateGridSelectionStats(values);
+    }
+
+    /**
+     * Whole-column statistics for the header context menu. Loaded results use
+     * the same filtered/sorted row set as the grid; disk-backed results ask
+     * SQLite so the summary covers every spilled row, not just the loaded page.
+     */
+    public async requestColumnStatistics(
+        result: UiResultSurfaceState | undefined,
+        columnIndex: number,
+    ): Promise<SharedColumnStatistics> {
+        if (!result) throw new Error('No active result.');
+        const column = result.columns[columnIndex];
+        if (!column) throw new Error('The selected column no longer exists.');
+        if (this.isDiskBackedResult(result)) {
+            const response = await this.requestDiskQuery(result, {
+                action: 'aggregate',
+                aggregations: COLUMN_STATISTICS_FUNCTIONS.map(fn => ({ columnIndex, fn })),
+                querySpec: sharedDiskQuerySpec(result),
+            });
+            const values: Record<string, unknown> = {};
+            for (const item of response.aggregations ?? []) values[item.fn] = item.value;
+            const totalRowCount = response.totalRows ?? result.totalRowCount ?? response.filteredCount ?? 0;
+            return buildDatabaseColumnStatistics({
+                columnIndex,
+                columnName: column.name,
+                columnType: column.type,
+                rowCount: response.filteredCount ?? totalRowCount,
+                totalRowCount,
+                values,
+            });
+        }
+        const sourceRows = this.getRows(result);
+        const rowIndices = processDataGridRowIndices(result.columns, sourceRows, result.view);
+        const rows: unknown[][] = [];
+        for (const index of rowIndices) {
+            const row = sourceRows[index];
+            if (row) rows.push(row);
+        }
+        return computeLoadedColumnStatistics(rows, columnIndex, column.name, column.type);
     }
 
     public isEditMode(): boolean {
@@ -3440,7 +3484,7 @@ export class SharedResultPanelController {
         });
     }
 
-    private async requestTestDiskQuery(
+    private requestTestDiskQuery(
         result: UiResultSurfaceState,
         request: {
             readonly action: 'count' | 'distinct' | 'aggregate' | 'group';
@@ -3448,6 +3492,24 @@ export class SharedResultPanelController {
             readonly distinctLimit?: number;
             readonly aggregations?: readonly { readonly columnIndex: number; readonly fn: string }[];
             readonly grouping?: readonly { readonly columnIndex: number }[];
+            readonly querySpec?: DiskQuerySpec;
+            readonly offset?: number;
+            readonly limit?: number;
+        },
+        timeoutMs = 15_000,
+    ): Promise<Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>> {
+        return this.requestDiskQuery(result, request, timeoutMs);
+    }
+
+    private async requestDiskQuery(
+        result: UiResultSurfaceState,
+        request: {
+            readonly action: 'count' | 'distinct' | 'aggregate' | 'group';
+            readonly columnIndex?: number;
+            readonly distinctLimit?: number;
+            readonly aggregations?: readonly { readonly columnIndex: number; readonly fn: string }[];
+            readonly grouping?: readonly { readonly columnIndex: number }[];
+            readonly querySpec?: DiskQuerySpec;
             readonly offset?: number;
             readonly limit?: number;
         },
@@ -3475,6 +3537,7 @@ export class SharedResultPanelController {
                 ...(request.aggregations === undefined
                     ? {}
                     : { aggregations: request.aggregations.map(item => ({ ...item })) }),
+                ...(request.querySpec === undefined ? {} : { querySpec: request.querySpec }),
                 ...(request.grouping === undefined
                     ? {}
                     : { grouping: request.grouping.map(item => ({ ...item })) }),
@@ -4253,12 +4316,20 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     const [exportFormat, setExportFormat] = useState('excel');
     const [exportDestination, setExportDestination] = useState<ResultExportDestination>('file');
     const [exportScope, setExportScope] = useState<'loaded' | 'all'>('loaded');
+    const [columnStats, setColumnStats] = useState<{
+        readonly columnName: string;
+        readonly columnType?: string;
+        readonly loading: boolean;
+        readonly error?: string;
+        readonly statistics?: SharedColumnStatistics;
+    } | undefined>();
     const [refreshLimitOpen, setRefreshLimitOpen] = useState(false);
     const [refreshLimitInitial, setRefreshLimitInitial] = useState('');
     const [dismissedLimitKey, setDismissedLimitKey] = useState<string | undefined>();
     const [copyingAll, setCopyingAll] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const analysisGenerationRef = useRef(0);
+    const columnStatsRequestRef = useRef(0);
     const dataGridRef = useRef<DataGridHandle>(null);
     const columnSearchRef = useRef<HTMLInputElement>(null);
     const focusSidebarSearchRef = useRef(false);
@@ -4279,6 +4350,8 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         if (!controller.isTestExploreWorkflowActive()) setViewLayout('table');
         setDiffBaselineId(undefined);
         setExportOpen(false);
+        columnStatsRequestRef.current += 1;
+        setColumnStats(undefined);
         setRefreshLimitOpen(false);
         setDismissedLimitKey(undefined);
         closeAnalysis();
@@ -4671,6 +4744,50 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
             isNull: value === null || value === undefined,
         });
     };
+    const openColumnStatistics = useCallback((context: DataGridCellContext): void => {
+        const result = activeResult;
+        const column = result?.columns[context.columnIndex];
+        if (!result || !column) return;
+        const request = ++columnStatsRequestRef.current;
+        const sourceId = result.sourceId;
+        const resultSetId = result.resultSetId;
+        setColumnStats({ columnName: column.name, columnType: column.type, loading: true });
+        void controller.requestColumnStatistics(result, context.columnIndex).then(statistics => {
+            if (request !== columnStatsRequestRef.current) return;
+            const current = controller.activeResult();
+            if (!current || current.sourceId !== sourceId || current.resultSetId !== resultSetId) return;
+            setColumnStats({ columnName: column.name, columnType: column.type, loading: false, statistics });
+        }).catch(error => {
+            if (request !== columnStatsRequestRef.current) return;
+            setColumnStats({
+                columnName: column.name,
+                columnType: column.type,
+                loading: false,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
+    }, [activeResult, controller]);
+    const copyColumnStatistics = useCallback((statistics: SharedColumnStatistics): void => {
+        const lines = [
+            'Statistic\tValue',
+            `Column\t${statistics.columnName}`,
+            `Scope\t${statistics.scope === 'database' ? 'SQLite' : 'Loaded rows'}`,
+            `Rows\t${statistics.rowCount}`,
+            `Non-null\t${statistics.count}`,
+            `Nulls\t${statistics.nullCount}`,
+            `Distinct\t${statistics.distinctCount}`,
+        ];
+        for (const [label, value] of [
+            ['Sum', statistics.sum],
+            ['Average', statistics.avg],
+            ['Minimum', statistics.min],
+            ['Maximum', statistics.max],
+            ['Std deviation', statistics.stdev],
+        ] as const) {
+            if (value !== undefined) lines.push(`${label}\t${value}`);
+        }
+        postHostMessage({ command: 'copyToClipboard', text: lines.join('\n') });
+    }, []);
     const getColumnFormatting = useCallback((column: { readonly name: string }, columnIndex: number): DataGridFormattingOptions | undefined =>
         controller.getFormattingForColumn(column, columnIndex), [controller]);
     const openAnalysisCellValue = (context: DataGridCellContext): void => {
@@ -5031,6 +5148,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                             setViewLayout('explore');
                             window.setTimeout(() => focusExploreColumn(context.columnIndex), 80);
                         }}
+                        onColumnStatistics={openColumnStatistics}
                     />)}
                 </AsyncStateView>}
                 {rowViewOpen && !isLogResult && !pivotActive && activeResult && <RowViewPanel
@@ -5065,6 +5183,18 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         controller.refresh(activeResult, limit);
                     }}
                     onCancel={() => setRefreshLimitOpen(false)}
+                />}
+                {columnStats && <ColumnStatisticsDialog
+                    columnName={columnStats.columnName}
+                    columnType={columnStats.columnType}
+                    loading={columnStats.loading}
+                    error={columnStats.error}
+                    statistics={columnStats.statistics}
+                    onCopy={copyColumnStatistics}
+                    onClose={() => {
+                        columnStatsRequestRef.current += 1;
+                        setColumnStats(undefined);
+                    }}
                 />}
                 {exportOpen && activeResult && <ResultExportDialog
                     format={exportFormat}

@@ -315,6 +315,8 @@ export interface DataGridProps {
   readonly catalogBound?: boolean;
   /** Switches to the column profile surface for the context column. */
   readonly onProfileColumn?: (context: DataGridCellContext) => void;
+  /** Opens whole-column statistics for the context column. */
+  readonly onColumnStatistics?: (context: DataGridCellContext) => void;
   /** Keeps the legacy inline text field for hosts without a filter surface. */
   readonly showInlineColumnFilters?: boolean;
   /** Marks the grid as loading without unmounting virtualized rows. */
@@ -1224,6 +1226,7 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
   onColumnAction,
   catalogBound = false,
   onProfileColumn,
+  onColumnStatistics,
   busy = false,
 }: DataGridProps, ref): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
@@ -3002,6 +3005,7 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
       {onColumnAction && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'addToSelect'); setContextMenu(undefined); }}><MenuIcon name="plus" />Add to SELECT</button>}
       {onOpenColumnFilter && <button type="button" role="menuitem" onClick={() => { const anchor = contextMenuElementRef.current?.getBoundingClientRect() ?? new DOMRect(contextMenu.clientX, contextMenu.clientY, 0, 0); onOpenColumnFilter({ columnIndex: contextMenu.columnIndex, column: contextColumn, anchor }); setContextMenu(undefined); }}><MenuIcon name="check-square" />Select Distinct</button>}
       {onProfileColumn && <button type="button" role="menuitem" onClick={() => { onProfileColumn(contextMenu); setContextMenu(undefined); }}><MenuIcon name="bar-chart" />Profile Column</button>}
+      {onColumnStatistics && <button type="button" role="menuitem" onClick={() => { onColumnStatistics(contextMenu); setContextMenu(undefined); }}><MenuIcon name="table" />Column statistics…</button>}
       {onColumnAction && catalogBound && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'commentOnColumn'); setContextMenu(undefined); }}><MenuIcon name="message-square" />Comment on Column…</button>}
       {onColumnAction && catalogBound && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'findReferences'); setContextMenu(undefined); }}><MenuIcon name="git-branch" />Find References</button>}
       {onColumnAction && catalogBound && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'toggleFavorite'); setContextMenu(undefined); }}><MenuIcon name="star" />Add to favorites</button>}

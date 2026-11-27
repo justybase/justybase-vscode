@@ -4286,6 +4286,155 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
 
 .ui-export-footer button:disabled { cursor: not-allowed; opacity: .5; }
 
+/* Whole-column statistics opened from the grid header context menu. */
+.ui-column-stats-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.ui-column-stats-dialog {
+  display: flex;
+  width: min(460px, 100%);
+  max-height: calc(100vh - 32px);
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 6px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+.ui-column-stats-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ui-column-stats-header h2 {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+
+.ui-column-stats-header span {
+  display: block;
+  max-width: 340px;
+  overflow: hidden;
+  color: var(--justybase-grid-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-column-stats-close {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ui-column-stats-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgb(128 128 128 / 15%));
+}
+
+.ui-column-stats-scope {
+  padding: 4px 8px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 10px;
+  color: var(--justybase-grid-muted);
+  background: var(--justybase-grid-bg);
+  font-size: 10px;
+}
+
+.ui-column-stats-status,
+.ui-column-stats-error {
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.ui-column-stats-status {
+  color: var(--justybase-grid-muted);
+  background: var(--justybase-grid-bg);
+}
+
+.ui-column-stats-error {
+  color: var(--vscode-errorForeground, #f14c4c);
+  background: var(--vscode-inputValidation-errorBackground, rgb(241 76 76 / 12%));
+  white-space: pre-wrap;
+}
+
+.ui-column-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ui-column-stats-table th,
+.ui-column-stats-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--justybase-grid-border) 60%, transparent);
+  text-align: left;
+}
+
+.ui-column-stats-table th {
+  color: var(--justybase-grid-muted);
+  font-weight: 500;
+}
+
+.ui-column-stats-table td {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ui-column-stats-note {
+  margin: 0;
+  color: var(--justybase-grid-muted);
+  font-size: 10px;
+}
+
+.ui-column-stats-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--justybase-grid-border);
+}
+
+.ui-column-stats-footer button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 12px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: inherit;
+  background: var(--justybase-grid-bg);
+  cursor: pointer;
+  font: inherit;
+}
+
+.ui-column-stats-footer button:hover {
+  background: var(--justybase-grid-hover);
+}
+
 /* Log console: legacy line rhythm, status badges and SQL previews. */
 .ui-log-line {
   display: flex;
