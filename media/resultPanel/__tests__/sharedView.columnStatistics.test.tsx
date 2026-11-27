@@ -86,4 +86,56 @@ describe('whole-column statistics', () => {
         });
         controller.dispose();
     });
+
+    it('requests exact analytical statistics over every spilled row', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage({
+            command: 'diskBackedActivate',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            resultSetId: 'disk-analytical',
+            totalRows: 1_000,
+            columns: [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'AMOUNT', type: 'INTEGER' }],
+            rows: [['A', 1]],
+            limitReached: false,
+        });
+        const result = controller.activeResult();
+        expect(result).toBeDefined();
+
+        const request = {
+            groupColumns: [0],
+            statColumns: [1],
+            limit: 500,
+            topColumns: [] as number[],
+            topLimit: 8,
+            rareColumns: [] as number[],
+            categoryColumns: [] as number[],
+        };
+        const pending = controller.requestAnalyticalDiskBatch(result!, request);
+        await waitFor(() => {
+            expect(posted.some(message => message.command === 'diskQuery' && message.action === 'groupStats')).toBe(true);
+        });
+        const message = posted.find(item => item.command === 'diskQuery' && item.action === 'groupStats');
+        expect(message).toMatchObject({ action: 'groupStats', groupStats: request });
+
+        const groupStatsResult = {
+            groupColumns: [0],
+            totalRows: 1_000,
+            totalGroups: 2,
+            groups: [],
+            unlistedRows: 0,
+            population: [],
+        };
+        controller.handleHostMessage({
+            command: 'diskQueryResult',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            requestId: Number(message!.requestId),
+            action: 'groupStats',
+            groupStatsResult,
+        });
+
+        await expect(pending).resolves.toEqual(groupStatsResult);
+        controller.dispose();
+    });
 });

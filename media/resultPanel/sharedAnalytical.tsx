@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ANOMALY_RULES, applyAnomalies } from './analytical/anomalyRules.js';
 import { computeGroupStatsSync } from './analytical/computeGroupStats.js';
+import { analyzedColumnsFor, buildDiskGroupDataset, DISK_STAT_BATCH_COLUMNS, type AnalysisColumn } from './analytical/diskAdapter.js';
+import { analyticalSchemaKey, loadAnalyticalState, saveAnalyticalState } from './analytical/analyticalPersistence.js';
+import { getHostState, setHostState } from './protocol.js';
 import {
   DETECTION_CHOICES,
   DETECTION_CHOICE_HELP,
@@ -15,15 +18,19 @@ import {
   ANALYTICAL_MAX_ANALYZED_COLUMNS,
   ANALYTICAL_MAX_GROUPS,
   ANALYTICAL_SCORE_ANOMALOUS,
+  ANALYTICAL_TOP_VALUES,
   type AnalyticalColumnStats,
   type AnalyticalDataset,
   type AnalyticalGroup,
+  type AnalyticalGroupColumnRef,
+  type AnalyticalPersistedState,
   type AnalyticalSensitivity,
   type AnomalyRuleId,
   type DetectionChoice,
   type SkippedEvaluationReason,
 } from './analytical/types.js';
 import { classifyColumns } from './explore/columnClassification.js';
+import type { DiskGroupStatsRequest, DiskGroupStatsResult } from './types.js';
 
 export interface SharedAnalyticalColumn {
   readonly name: string;
@@ -35,6 +42,12 @@ export interface SharedAnalyticalViewProps {
   readonly rows: readonly (readonly unknown[])[];
   /** Existing grid grouping; its first column becomes the initial group. */
   readonly grouping?: readonly string[];
+  /** True when every row lives in SQLite and only a page is loaded here. */
+  readonly diskBacked?: boolean;
+  /** Requests one exact statistics batch over every spilled row. */
+  readonly analyzeDisk?: (request: DiskGroupStatsRequest) => Promise<DiskGroupStatsResult>;
+  /** Stable result identity; options are persisted per result under this key. */
+  readonly stateKey?: string;
   readonly onClose: () => void;
 }
 
@@ -114,7 +127,14 @@ function selectedGroupNotice(dataset: AnalyticalDataset, resolved: ResolvedDetec
  * selected baseline and explains every flag. Options re-score the cached
  * statistics; only the grouping and robust quartiles recompute the dataset.
  */
-export function SharedAnalyticalView({ columns, rows, grouping, onClose }: SharedAnalyticalViewProps): ReactNode {
+export function SharedAnalyticalView({ columns, rows, grouping, diskBacked = false, analyzeDisk, stateKey, onClose }: SharedAnalyticalViewProps): ReactNode {
+  const schemaKey = useMemo(() => analyticalSchemaKey(columns), [columns]);
+  const [initialPersisted] = useState(() => loadAnalyticalState(
+    stateKey ? getHostState() : undefined,
+    stateKey,
+    columns,
+    schemaKey,
+  ));
   const dimensions = useMemo(() => {
     const roles = classifyColumns(columns.map(column => ({ name: column.name, type: column.type })), rows);
     const candidates = columns
@@ -122,24 +142,36 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
       .filter(item => item.role !== 'measure');
     return candidates.length > 0 ? candidates : columns.map((column, index) => ({ column, index, role: 'unknown' as const }));
   }, [columns, rows]);
-  const initialGrouping = (grouping ?? [])
+  const persistedGrouping = initialPersisted.groupColumns
+    .map(ref => ref.name)
     .filter(name => columns.some(column => column.name === name))
     .slice(0, 3);
+  const initialGrouping = persistedGrouping.length > 0
+    ? persistedGrouping
+    : (grouping ?? []).filter(name => columns.some(column => column.name === name)).slice(0, 3);
   const [groupColumns, setGroupColumns] = useState<readonly (string | undefined)[]>(() => {
     const initial = initialGrouping.length > 0 ? initialGrouping : dimensions[0]?.column.name ? [dimensions[0].column.name] : [];
     return [initial[0], initial[1], initial[2]];
   });
-  const [detection, setDetection] = useState<DetectionChoice>('default');
-  const [sensitivity, setSensitivity] = useState<AnalyticalSensitivity>('normal');
-  const [minGroupRows, setMinGroupRows] = useState(ANALYTICAL_DEFAULT_MIN_GROUP_ROWS);
-  const [disabledRules, setDisabledRules] = useState<readonly AnomalyRuleId[]>([]);
-  const [excludedColumns, setExcludedColumns] = useState<readonly number[]>([]);
-  const [anomaliesOnly, setAnomaliesOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<AnalyticalSortKey>('size');
-  const [sortDesc, setSortDesc] = useState(true);
-  const [referenceGroupKey, setReferenceGroupKey] = useState<string | undefined>();
+  const [detection, setDetection] = useState<DetectionChoice>(initialPersisted.detection.mode);
+  const [sensitivity, setSensitivity] = useState<AnalyticalSensitivity>(initialPersisted.sensitivity);
+  const [minGroupRows, setMinGroupRows] = useState(initialPersisted.minGroupRows);
+  const [disabledRules, setDisabledRules] = useState<readonly AnomalyRuleId[]>(initialPersisted.disabledRules);
+  const [excludedColumns, setExcludedColumns] = useState<readonly number[]>(initialPersisted.excludedColumns.map(ref => ref.index));
+  const [anomaliesOnly, setAnomaliesOnly] = useState(initialPersisted.anomaliesOnly);
+  const [sortKey, setSortKey] = useState<AnalyticalSortKey>(initialPersisted.sort.key);
+  const [sortDesc, setSortDesc] = useState(initialPersisted.sort.desc);
+  const [referenceGroupKey, setReferenceGroupKey] = useState<string | undefined>(initialPersisted.detection.referenceGroupKey);
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const [selectedGroupKey, setSelectedGroupKey] = useState<string | undefined>();
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string | undefined>(initialPersisted.selectedGroupKey);
+  const [disk, setDisk] = useState<{
+    readonly dataset?: AnalyticalDataset;
+    readonly loading: boolean;
+    readonly error?: string;
+    readonly batch: number;
+    readonly batches: number;
+  }>({ loading: false, batch: 0, batches: 0 });
+  const diskGeneration = useRef(0);
 
   const selectedGroupColumns = groupColumns.filter((name): name is string => !!name);
   const selectedGroupColumnsKey = selectedGroupColumns.join('\u0000');
@@ -160,7 +192,98 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
     setReferenceGroupKey(undefined);
   };
 
-  const base = useMemo((): { dataset?: AnalyticalDataset; error?: string } => {
+  /**
+   * Disk-backed result: the loaded page is not the population. Request exact
+   * group statistics in bounded column batches and merge them into the same
+   * dataset shape the in-memory engine produces.
+   */
+  useEffect(() => {
+    if (!diskBacked) {
+      diskGeneration.current += 1;
+      setDisk({ loading: false, batch: 0, batches: 0 });
+      return undefined;
+    }
+    const generation = ++diskGeneration.current;
+    const groupRefs = groupColumns
+      .filter((name): name is string => !!name)
+      .map(name => ({ name, index: columns.findIndex(column => column.name === name) }))
+      .filter(item => item.index >= 0);
+    if (groupRefs.length === 0) {
+      setDisk({ loading: false, batch: 0, batches: 0, error: 'Choose a column to group by.' });
+      return undefined;
+    }
+    if (!analyzeDisk) {
+      setDisk({ loading: false, batch: 0, batches: 0, error: 'Disk-backed analysis is not available.' });
+      return undefined;
+    }
+    const roles = classifyColumns(columns.map(column => ({ name: column.name, type: column.type })), rows);
+    const allColumns: AnalysisColumn[] = columns.map((column, index) => ({
+      index,
+      name: column.name,
+      role: roles[index] ?? 'unknown',
+    }));
+    const { analyzed } = analyzedColumnsFor(allColumns, groupRefs);
+    if (analyzed.length === 0) {
+      setDisk({ loading: false, batch: 0, batches: 0, error: 'No columns to analyze.' });
+      return undefined;
+    }
+    const batchCount = Math.ceil(analyzed.length / DISK_STAT_BATCH_COLUMNS);
+    setDisk({ loading: true, batch: 0, batches: batchCount });
+    let cancelled = false;
+    void (async () => {
+      const batches: DiskGroupStatsResult[] = [];
+      try {
+        for (let offset = 0; offset < analyzed.length; offset += DISK_STAT_BATCH_COLUMNS) {
+          if (cancelled || generation !== diskGeneration.current) return;
+          const batchColumns = analyzed.slice(offset, offset + DISK_STAT_BATCH_COLUMNS);
+          const statColumns = batchColumns.map(column => column.index);
+          const dimensionColumns = batchColumns
+            .filter(column => column.role === 'dimension' || column.role === 'unknown')
+            .map(column => column.index);
+          const measureColumns = batchColumns
+            .filter(column => column.role === 'measure')
+            .map(column => column.index);
+          const request: DiskGroupStatsRequest = {
+            groupColumns: groupRefs.map(ref => ref.index),
+            statColumns,
+            limit: ANALYTICAL_MAX_GROUPS,
+            topColumns: dimensionColumns,
+            topLimit: ANALYTICAL_TOP_VALUES,
+            rareColumns: dimensionColumns,
+            categoryColumns: dimensionColumns,
+            ...(needsQuantiles ? { quantileColumns: measureColumns } : {}),
+          };
+          const result = await analyzeDisk(request);
+          if (cancelled || generation !== diskGeneration.current) return;
+          batches.push(result);
+          setDisk(current => ({ ...current, batch: batches.length }));
+        }
+        const dataset = buildDiskGroupDataset({
+          columns: allColumns,
+          groupColumns: groupRefs,
+          batches,
+          quantiles: needsQuantiles,
+        });
+        if (cancelled || generation !== diskGeneration.current) return;
+        setDisk({ loading: false, dataset, batch: batches.length, batches: batchCount });
+      } catch (error) {
+        if (!cancelled && generation === diskGeneration.current) {
+          setDisk({
+            loading: false,
+            batch: batches.length,
+            batches: batchCount,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [analyzeDisk, columns, diskBacked, groupColumns, needsQuantiles, rows, selectedGroupColumnsKey]);
+
+  const memoryBase = useMemo((): { dataset?: AnalyticalDataset; error?: string } => {
+    if (diskBacked) return {};
     const resolved = selectedGroupColumns
       .map(name => ({ name, index: columns.findIndex(column => column.name === name) }))
       .filter(item => item.index >= 0);
@@ -183,11 +306,15 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }
-  }, [columns, needsQuantiles, rows, selectedGroupColumnsKey]);
+  }, [columns, diskBacked, needsQuantiles, rows, selectedGroupColumnsKey]);
+
+  const baseDataset = diskBacked ? disk.dataset : memoryBase.dataset;
+  const baseError = diskBacked ? disk.error : memoryBase.error;
+  const baseLoading = diskBacked && disk.loading;
 
   const scored = useMemo((): { dataset?: AnalyticalDataset; resolved?: ResolvedDetection; error?: string } => {
-    if (!base.dataset) return { error: base.error };
-    const dataset = base.dataset;
+    if (!baseDataset) return { error: baseError };
+    const dataset = baseDataset;
     const referenceKey = detection === 'reference' && referenceGroupKey && dataset.groups.some(group => group.key === referenceGroupKey)
       ? referenceGroupKey
       : undefined;
@@ -208,7 +335,7 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
         excludedColumns,
       }),
     };
-  }, [base, detection, disabledRules, excludedColumns, minGroupRows, referenceGroupKey, sensitivity]);
+  }, [baseDataset, baseError, detection, disabledRules, excludedColumns, minGroupRows, referenceGroupKey, sensitivity]);
 
   const visibleGroups = useMemo(() => {
     if (!scored.dataset) return [];
@@ -223,7 +350,8 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
 
   const selected = visibleGroups.find(group => group.key === selectedGroupKey) ?? visibleGroups[0];
   const notices = scored.dataset && scored.resolved ? selectedGroupNotice(scored.dataset, scored.resolved) : [];
-  const referenceOptions = base.dataset?.groups ?? [];
+  if (scored.dataset?.mode === 'disk') notices.unshift('Scope: all spilled rows; grid filters are not applied to this analysis.');
+  const referenceOptions = baseDataset?.groups ?? [];
   const activeReferenceKey = referenceOptions.some(group => group.key === referenceGroupKey) ? referenceGroupKey ?? '' : '';
   const anomalyCount = scored.dataset?.groups.filter(group => group.anomalous).length ?? 0;
   const flaggedColumns = new Set(selected?.flags.map(flag => flag.columnIndex).filter((index): index is number => index !== undefined) ?? []);
@@ -257,6 +385,33 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
     setSortDesc(true);
     setReferenceGroupKey(undefined);
   };
+
+  useEffect(() => {
+    if (!stateKey) return;
+    const groupRefs: AnalyticalGroupColumnRef[] = [];
+    for (const name of groupColumns) {
+      if (!name) continue;
+      const index = columns.findIndex(column => column.name === name);
+      if (index >= 0) groupRefs.push({ index, name });
+    }
+    const excludedRefs = excludedColumns
+      .map(index => ({ index, name: columns[index]?.name }))
+      .filter((ref): ref is AnalyticalGroupColumnRef => typeof ref.name === 'string');
+    const state: AnalyticalPersistedState = {
+      version: 2,
+      schemaKey,
+      groupColumns: groupRefs,
+      ...(selectedGroupKey ? { selectedGroupKey } : {}),
+      sort: { key: sortKey, desc: sortDesc },
+      sensitivity,
+      minGroupRows,
+      anomaliesOnly,
+      detection: { mode: detection, ...(referenceGroupKey ? { referenceGroupKey } : {}) },
+      disabledRules: [...disabledRules],
+      excludedColumns: excludedRefs,
+    };
+    setHostState(saveAnalyticalState(getHostState(), stateKey, state));
+  }, [anomaliesOnly, columns, detection, disabledRules, excludedColumns, groupColumns, minGroupRows, referenceGroupKey, schemaKey, selectedGroupKey, sensitivity, sortDesc, sortKey, stateKey]);
 
   return <section className="ui-analytical-view" aria-label="Analytical view">
     <header className="ui-analytical-header">
@@ -333,7 +488,7 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
       <details className="ui-analytical-column-picker">
         <summary>Excluded columns ({excludedColumns.length})</summary>
         <div className="ui-analytical-rule-grid">
-          {(base.dataset?.population ?? []).map(stats => <label key={stats.columnIndex}>
+          {(baseDataset?.population ?? []).map(stats => <label key={stats.columnIndex}>
             <input type="checkbox" checked={excludedColumns.includes(stats.columnIndex)} onChange={event => toggleExcludedColumn(stats.columnIndex, event.target.checked)} />
             {stats.name}
           </label>)}
@@ -341,13 +496,17 @@ export function SharedAnalyticalView({ columns, rows, grouping, onClose }: Share
       </details>
     </section>}
 
-    {scored.error
+    {baseLoading && !baseDataset
+      ? <div className="ui-analytical-status" role="status">
+        Analyzing all spilled rows…{disk.batches > 0 ? ` batch ${Math.min(disk.batch + 1, disk.batches)} of ${disk.batches}` : ''}
+      </div>
+      : scored.error
       ? <div className="ui-analytical-empty" role="status">{scored.error}</div>
       : scored.dataset && scored.resolved && <>
         <div className="ui-analytical-status">
           {visibleGroups.length.toLocaleString('en-US')} of {scored.dataset.groups.length.toLocaleString('en-US')} groups · {scored.dataset.totalRows.toLocaleString('en-US')} rows · {scored.dataset.population.length.toLocaleString('en-US')} columns compared · {DETECTION_MODE_NAME[scored.resolved.effective]} mode
           {scored.resolved.viaAuto ? ' (auto)' : ''}
-          {' · loaded rows'}
+          {` · ${scored.dataset.mode === 'disk' ? 'all spilled rows' : 'loaded rows'}`}
           {anomalyCount > 0 ? ` · ${anomalyCount.toLocaleString('en-US')} anomalous` : ''}
         </div>
         {notices.length > 0 && <div className="ui-analytical-notices" role="status">

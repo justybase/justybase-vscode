@@ -80,7 +80,7 @@ import type {
     ResultLayoutKind,
 } from '@justybase/ui-react';
 import { asHostMessage, callPanelMethod, getHostState, postHostMessage, setHostState } from './protocol.js';
-import type { DiskColumnFilterSpec, DiskGroupPathItem, DiskGroupQueryResult, DiskQuerySpec } from './types.js';
+import type { DiskColumnFilterSpec, DiskGroupPathItem, DiskGroupQueryResult, DiskGroupStatsRequest, DiskGroupStatsResult, DiskQuerySpec } from './types.js';
 import type { ResultPanelExportFormat, ResultPanelHostToWebviewMessage, ResultPanelTraceEventPayload } from './hostContracts.js';
 import { isSharedCopyFormat, writeSharedClipboard } from './sharedClipboard.js';
 import type { SharedClipboardFormat, SharedCopyFormat } from './sharedClipboard.js';
@@ -1000,7 +1000,7 @@ export class SharedResultPanelController {
         readonly timer: ReturnType<typeof setTimeout>;
     }>();
     private readonly pendingDiskQueries = new Map<number, {
-        readonly action: 'count' | 'distinct' | 'aggregate' | 'group';
+        readonly action: 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
         readonly resolve: (message: Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>) => void;
         readonly reject: (error: Error) => void;
         readonly timer: ReturnType<typeof setTimeout>;
@@ -1369,6 +1369,24 @@ export class SharedResultPanelController {
             if (row) rows.push(row);
         }
         return computeLoadedColumnStatistics(rows, columnIndex, column.name, column.type);
+    }
+
+    /**
+     * Exact analytical statistics over every spilled row. The host deliberately
+     * ignores grid filters for this action, matching the legacy disk analysis.
+     */
+    public async requestAnalyticalDiskBatch(
+        result: UiResultSurfaceState,
+        request: DiskGroupStatsRequest,
+    ): Promise<DiskGroupStatsResult> {
+        const response = await this.requestDiskQuery(result, {
+            action: 'groupStats',
+            groupStats: request,
+        }, 60_000);
+        if (!response.groupStatsResult) {
+            throw new Error('Disk-backed analysis returned no statistics.');
+        }
+        return response.groupStatsResult;
     }
 
     public isEditMode(): boolean {
@@ -3487,11 +3505,12 @@ export class SharedResultPanelController {
     private requestTestDiskQuery(
         result: UiResultSurfaceState,
         request: {
-            readonly action: 'count' | 'distinct' | 'aggregate' | 'group';
+            readonly action: 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
             readonly columnIndex?: number;
             readonly distinctLimit?: number;
             readonly aggregations?: readonly { readonly columnIndex: number; readonly fn: string }[];
             readonly grouping?: readonly { readonly columnIndex: number }[];
+            readonly groupStats?: DiskGroupStatsRequest;
             readonly querySpec?: DiskQuerySpec;
             readonly offset?: number;
             readonly limit?: number;
@@ -3504,11 +3523,12 @@ export class SharedResultPanelController {
     private async requestDiskQuery(
         result: UiResultSurfaceState,
         request: {
-            readonly action: 'count' | 'distinct' | 'aggregate' | 'group';
+            readonly action: 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
             readonly columnIndex?: number;
             readonly distinctLimit?: number;
             readonly aggregations?: readonly { readonly columnIndex: number; readonly fn: string }[];
             readonly grouping?: readonly { readonly columnIndex: number }[];
+            readonly groupStats?: DiskGroupStatsRequest;
             readonly querySpec?: DiskQuerySpec;
             readonly offset?: number;
             readonly limit?: number;
@@ -3537,6 +3557,7 @@ export class SharedResultPanelController {
                 ...(request.aggregations === undefined
                     ? {}
                     : { aggregations: request.aggregations.map(item => ({ ...item })) }),
+                ...(request.groupStats === undefined ? {} : { groupStats: request.groupStats }),
                 ...(request.querySpec === undefined ? {} : { querySpec: request.querySpec }),
                 ...(request.grouping === undefined
                     ? {}
@@ -4767,6 +4788,18 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
             });
         });
     }, [activeResult, controller]);
+    const analyticalSourceId = activeResult?.sourceId;
+    const analyticalResultSetId = activeResult?.resultSetId;
+    const analyticalStateKey = analyticalSourceId !== undefined && analyticalResultSetId !== undefined
+        ? resultKey(analyticalSourceId, analyticalResultSetId)
+        : undefined;
+    const analyzeAnalyticalDisk = useCallback((request: DiskGroupStatsRequest): Promise<DiskGroupStatsResult> => {
+        const result = controller.activeResult();
+        if (!result || result.sourceId !== analyticalSourceId || result.resultSetId !== analyticalResultSetId) {
+            return Promise.reject(new Error('The active result changed.'));
+        }
+        return controller.requestAnalyticalDiskBatch(result, request);
+    }, [analyticalResultSetId, analyticalSourceId, controller]);
     const copyColumnStatistics = useCallback((statistics: SharedColumnStatistics): void => {
         const lines = [
             'Statistic\tValue',
@@ -5104,9 +5137,13 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         />
                         : viewLayout === 'analytical'
                         ? <SharedAnalyticalView
+                            key={analyticalStateKey ?? 'analytical-view'}
                             columns={activeResult.columns}
                             rows={rows}
                             grouping={activeResult.view.grouping}
+                            diskBacked={controller.isDiskBackedResult(activeResult)}
+                            analyzeDisk={analyzeAnalyticalDisk}
+                            stateKey={analyticalStateKey}
                             onClose={() => setViewLayout('table')}
                         />
                         : <DataGrid
