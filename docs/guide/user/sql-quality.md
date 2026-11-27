@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.23.0
+product_version: 3.23.1
 ---
 
 # SQL quality and diagnostics
