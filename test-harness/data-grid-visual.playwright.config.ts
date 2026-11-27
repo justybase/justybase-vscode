@@ -13,7 +13,10 @@ export default defineConfig({
   },
   retries: 0,
   outputDir: path.resolve(repositoryRoot, 'test-results/data-grid-visual'),
-  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
+  // Text antialiasing differs between the Linux CI images and local Windows
+  // runs. Keep one baseline per platform so both can assert real layout
+  // changes instead of failing on font rasterization.
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{-platform}{ext}',
   use: {
     baseURL: 'http://127.0.0.1:8894',
     browserName: 'chromium',
